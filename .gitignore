@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Turborepo
+.turbo/
+
+# Coverage
+coverage/
+
+# Logs
+*.log
+
+# TypeScript build info
+*.tsbuildinfo
+
+# DeskPilot local data
+.deskpilot/

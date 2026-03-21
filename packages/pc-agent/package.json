@@ -1,0 +1,27 @@
+{
+  "name": "@deskpilot/pc-agent",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/electron/main.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "dev:electron": "tsc && electron .",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "start:electron": "electron .",
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix"
+  },
+  "dependencies": {
+    "@deskpilot/shared": "workspace:*",
+    "dotenv": "^17.3.1",
+    "trtc-electron-sdk": "^12.7.706",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "electron": "^41.0.3"
+  }
+}

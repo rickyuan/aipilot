@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/shared" },
+    { "path": "packages/pc-agent" },
+    { "path": "packages/cloud" },
+    { "path": "packages/mobile" }
+  ]
+}

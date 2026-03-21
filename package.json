@@ -1,0 +1,36 @@
+{
+  "name": "deskpilot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI Remote Workspace — Voice-controlled remote desktop for developers",
+  "packageManager": "pnpm@10.32.1",
+  "scripts": {
+    "dev": "turbo dev",
+    "dev:agent": "turbo dev --filter=@deskpilot/pc-agent",
+    "dev:cloud": "turbo dev --filter=@deskpilot/cloud",
+    "dev:mobile": "turbo dev --filter=@deskpilot/mobile",
+    "build": "turbo build",
+    "test": "turbo test",
+    "test:unit": "turbo test:unit",
+    "test:e2e": "turbo test:e2e",
+    "lint": "turbo lint",
+    "lint:fix": "turbo lint:fix",
+    "typecheck": "turbo typecheck"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "electron",
+      "trtc-electron-sdk"
+    ]
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "eslint": "^10.1.0",
+    "prettier": "^3.8.1",
+    "tsx": "^4.21.0",
+    "turbo": "^2.8.20",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  }
+}

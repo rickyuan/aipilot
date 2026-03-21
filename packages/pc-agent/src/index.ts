@@ -144,24 +144,34 @@ async function runLocal(): Promise<void> {
     // Connect to Cloud WebSocket relay (no TRTC room join)
     connectToCloudWs(session.roomId, pcUserId, session.hmacKey);
 
-    // Also support stdin for manual testing
-    console.log('[Agent] Type a command to test (or wait for mobile connection):');
+    // Support stdin for manual testing (only if TTY)
+    if (process.stdin.isTTY) {
+      console.log('[Agent] Type a command to test (or wait for mobile connection):');
 
-    const readline = await import('node:readline');
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const readline = await import('node:readline');
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
-    rl.on('line', (line: string) => {
-      const utterance = line.trim();
-      if (!utterance) return;
+      rl.on('line', (line: string) => {
+        const utterance = line.trim();
+        if (!utterance) return;
 
-      processUtterance(utterance, session.hmacKey).catch((err: unknown) => {
-        console.error('[Agent] Error:', err);
+        processUtterance(utterance, session.hmacKey).catch((err: unknown) => {
+          console.error('[Agent] Error:', err);
+        });
       });
-    });
 
-    rl.on('close', () => {
-      process.exit(0);
-    });
+      rl.on('close', () => {
+        process.exit(0);
+      });
+    } else {
+      console.log('[Agent] Waiting for commands via WebSocket relay...');
+      console.log('[Agent] Press Ctrl+C to stop');
+
+      // Keep process alive
+      await new Promise(() => {
+        // Process stays alive until Ctrl+C
+      });
+    }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     console.error(`[Agent] Failed to start local mode: ${message}`);

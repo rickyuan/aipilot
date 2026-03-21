@@ -2,10 +2,13 @@
  * PC Agent environment configuration.
  */
 
+import { resolve } from 'node:path';
 import { z } from 'zod/v4';
 import dotenv from 'dotenv';
 
-dotenv.config();
+// Load .env from project root (may run from packages/pc-agent via turbo)
+dotenv.config({ path: resolve(process.cwd(), '.env') });
+dotenv.config({ path: resolve(process.cwd(), '../../.env') });
 
 const envSchema = z.object({
   // Cloud orchestrator URL

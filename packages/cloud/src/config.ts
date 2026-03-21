@@ -2,10 +2,13 @@
  * Environment configuration with validation.
  */
 
+import { resolve } from 'node:path';
 import { z } from 'zod/v4';
 import dotenv from 'dotenv';
 
-dotenv.config();
+// Load .env from project root (may run from packages/cloud via turbo)
+dotenv.config({ path: resolve(process.cwd(), '.env') });
+dotenv.config({ path: resolve(process.cwd(), '../../.env') });
 
 const envSchema = z.object({
   // TRTC (for UserSig generation)

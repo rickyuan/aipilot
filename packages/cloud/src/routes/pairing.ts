@@ -9,6 +9,7 @@ import { Router } from 'express';
 import { z } from 'zod/v4';
 import { generatePairingCode, verifyPairingCode } from '../services/pairing-service.js';
 import { generateRoomConfig } from '../services/room-service.js';
+import { createBot, hasBotInRoom } from '../services/bot-service.js';
 
 export const pairingRouter = Router();
 
@@ -56,6 +57,18 @@ pairingRouter.post('/verify', async (req, res) => {
     const roomId = `dp_${pairing.pcUserId}_paired`;
     const mobileRoomConfig = generateRoomConfig(roomId, parsed.data.mobileUserId);
     const pcRoomConfig = generateRoomConfig(roomId, pairing.pcUserId);
+
+    // Auto-create AI bot in the room on successful pairing
+    if (!hasBotInRoom(roomId)) {
+      try {
+        await createBot(roomId);
+        console.log(`[Cloud] Bot auto-created for room ${roomId} after pairing`);
+      } catch (botErr: unknown) {
+        // Bot creation failure shouldn't block pairing
+        const botMsg = botErr instanceof Error ? botErr.message : 'Unknown';
+        console.warn(`[Cloud] Bot creation failed for room ${roomId}: ${botMsg}`);
+      }
+    }
 
     res.json({
       message: 'Pairing successful',

@@ -1,8 +1,11 @@
 /**
  * TRTC Conversational AI bot lifecycle management.
  *
- * Creates and destroys bots via TRTC REST API (CreateAIConversation).
+ * Creates and destroys bots via TRTC REST API (StartAIConversation).
  * The bot is NOT an SDK feature — it's managed via HTTP calls.
+ *
+ * The bot is configured with our Cloud's LLM callback URL so that
+ * ASR text is routed through our intent classification pipeline.
  */
 
 import { generateBotUserId } from '@deskpilot/shared';
@@ -35,7 +38,11 @@ export async function createBot(roomId: string): Promise<{ botConfig: AIBotConfi
     ttsVoice: 'default',
   };
 
-  const taskId = await createAIConversation(botConfig);
+  // Build LLM callback URL for the bot to send ASR text to
+  const publicUrl = config.DESKPILOT_PUBLIC_URL ?? `http://localhost:${String(config.PORT)}`;
+  const llmCallbackUrl = `${publicUrl}/api/bot/llm-callback`;
+
+  const taskId = await createAIConversation(botConfig, llmCallbackUrl);
   activeBots.set(roomId, taskId);
 
   console.log(`[Cloud] Bot created for room ${roomId}, taskId: ${taskId}`);

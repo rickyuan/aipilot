@@ -2,10 +2,11 @@
  * Custom hook for voice input management.
  *
  * Handles mic activation state and voice activity detection.
- * Actual audio is published via TRTC — this hook manages the UI state.
+ * Integrates with the TRTC service for actual mic control.
  */
 
 import { useState, useCallback } from 'react';
+import { startMicCapture, stopMicCapture } from '../services/trtc';
 
 interface UseVoiceState {
   isMicActive: boolean;
@@ -18,7 +19,7 @@ interface UseVoiceActions {
 }
 
 /**
- * Hook for managing voice input UI state.
+ * Hook for managing voice input UI state with real TRTC mic control.
  * @returns Mic state and control actions
  */
 export function useVoice(): UseVoiceState & UseVoiceActions {
@@ -26,8 +27,15 @@ export function useVoice(): UseVoiceState & UseVoiceActions {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const toggleMic = useCallback(() => {
-    setMicActive((prev) => !prev);
-    // TODO: Call startMicCapture / stopMicCapture from TRTC service
+    setMicActive((prev) => {
+      const next = !prev;
+      if (next) {
+        startMicCapture();
+      } else {
+        stopMicCapture();
+      }
+      return next;
+    });
   }, []);
 
   const setProcessing = useCallback((processing: boolean) => {

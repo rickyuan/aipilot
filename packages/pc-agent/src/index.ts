@@ -3,14 +3,22 @@
  *
  * Connects to TRTC room, publishes screen capture,
  * listens for command payloads from the AI bot, and executes them.
+ *
+ * Modes:
+ *   (default)   — Production: connect to Cloud, create session, show pairing code
+ *   --demo      — Test command execution without TRTC
+ *   --classify  — Test intent classification pipeline
+ *   --local     — Local dev mode: WebSocket relay only, no TRTC
  */
 
 import './config.js'; // Load env vars first
+import { hostname } from 'node:os';
 import type { CommandPayload } from '@deskpilot/shared';
 import { joinRoom, startScreenCapture, onCommandReceived, sendCommandResult, simulateIncomingCommand } from './trtc/room.js';
 import { routeCommand } from './executors/router.js';
 import { processUtterance } from './intent/pipeline.js';
 import { createSession, generatePairingCode } from './cloud-client.js';
+import { connectToCloudWs } from './cloud-ws.js';
 
 /**
  * Handles incoming command payloads from the AI bot.
@@ -51,16 +59,22 @@ async function main(): Promise<void> {
     return;
   }
 
+  // If started with --local, run in local dev mode (WebSocket only, no TRTC)
+  if (process.argv.includes('--local')) {
+    await runLocal();
+    return;
+  }
+
   // Production mode: connect to Cloud API, create session, show pairing code
   await runProduction();
 }
 
 /**
  * Production mode — connects to Cloud API, creates session,
- * displays pairing code, and joins TRTC room.
+ * displays pairing code, joins TRTC room, and starts WebSocket relay.
  */
 async function runProduction(): Promise<void> {
-  const pcUserId = `pc_${require('node:os').hostname()}_${Date.now()}`;
+  const pcUserId = `pc_${hostname()}_${Date.now()}`;
 
   console.log(`[Agent] PC User ID: ${pcUserId}`);
   console.log('[Agent] Connecting to Cloud API...');
@@ -74,18 +88,22 @@ async function runProduction(): Promise<void> {
     // Generate pairing code
     const pairing = await generatePairingCode(pcUserId);
     console.log('');
-    console.log('╔══════════════════════════════════════╗');
-    console.log('║                                      ║');
-    console.log(`║     Pairing Code:  ${pairing.pairingCode}            ║`);
-    console.log('║                                      ║');
-    console.log('║  Enter this code on your mobile app  ║');
-    console.log(`║  Expires: ${new Date(pairing.expiresAt).toLocaleTimeString()}                    ║`);
-    console.log('╚══════════════════════════════════════╝');
+    console.log('======================================');
+    console.log('');
+    console.log(`     Pairing Code:  ${pairing.pairingCode}`);
+    console.log('');
+    console.log('  Enter this code on your mobile app');
+    console.log(`  Expires: ${new Date(pairing.expiresAt).toLocaleTimeString()}`);
+    console.log('');
+    console.log('======================================');
     console.log('');
 
     // Join TRTC room
     await joinRoom(roomConfig);
     await startScreenCapture();
+
+    // Connect to Cloud WebSocket relay for voice command pipeline
+    connectToCloudWs(session.roomId, pcUserId, session.hmacKey);
 
     console.log('[Agent] Waiting for mobile connection and voice commands...');
     console.log('[Agent] Press Ctrl+C to stop');
@@ -98,6 +116,55 @@ async function runProduction(): Promise<void> {
     const message = err instanceof Error ? err.message : 'Unknown error';
     console.error(`[Agent] Failed to start: ${message}`);
     console.log('[Agent] Make sure the Cloud server is running (pnpm dev:cloud)');
+    process.exit(1);
+  }
+}
+
+/**
+ * Local dev mode — WebSocket relay only, no TRTC.
+ * Useful for testing the intent pipeline without live TRTC credentials.
+ */
+async function runLocal(): Promise<void> {
+  const pcUserId = `pc_${hostname()}_local`;
+
+  console.log('[Agent] Running in LOCAL dev mode (no TRTC)');
+  console.log('[Agent] Connecting to Cloud API...');
+
+  try {
+    // Create session
+    const { session } = await createSession(pcUserId);
+    console.log(`[Agent] Session: ${session.sessionId}`);
+
+    // Generate pairing code
+    const pairing = await generatePairingCode(pcUserId);
+    console.log('');
+    console.log(`  Pairing Code: ${pairing.pairingCode}`);
+    console.log('');
+
+    // Connect to Cloud WebSocket relay (no TRTC room join)
+    connectToCloudWs(session.roomId, pcUserId, session.hmacKey);
+
+    // Also support stdin for manual testing
+    console.log('[Agent] Type a command to test (or wait for mobile connection):');
+
+    const readline = await import('node:readline');
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+    rl.on('line', (line: string) => {
+      const utterance = line.trim();
+      if (!utterance) return;
+
+      processUtterance(utterance, session.hmacKey).catch((err: unknown) => {
+        console.error('[Agent] Error:', err);
+      });
+    });
+
+    rl.on('close', () => {
+      process.exit(0);
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error(`[Agent] Failed to start local mode: ${message}`);
     process.exit(1);
   }
 }

@@ -2,7 +2,7 @@
  * Remote screen — displays PC screen share with voice control overlay.
  *
  * This is the main screen after pairing. Shows the PC's screen
- * and provides voice input controls.
+ * and provides voice input controls with command feedback.
  */
 
 import React, { useEffect, useState } from 'react';
@@ -19,7 +19,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Remote'>;
 
 export function RemoteScreen({ route }: Props): React.JSX.Element {
   const { roomId } = route.params;
-  const { connected, remoteUsers, connect } = useTRTC();
+  const { connected, remoteUsers, lastCommandResult, connect } = useTRTC();
   const { isMicActive, isProcessing, toggleMic, setProcessing } = useVoice();
   const [lastFeedback, setLastFeedback] = useState<string | null>(null);
 
@@ -38,11 +38,33 @@ export function RemoteScreen({ route }: Props): React.JSX.Element {
     init().catch(console.error);
   }, [roomId, connect]);
 
-  // TODO: Listen for command result custom messages from TRTC
-  // and update lastFeedback + setProcessing accordingly
+  // Handle command results from TRTC custom messages
+  useEffect(() => {
+    if (!lastCommandResult) return;
 
-  // Find the PC Agent in remote users
-  const pcUserId = remoteUsers.find((id) => !id.startsWith('bot_')) ?? 'pc-agent';
+    setProcessing(false);
+
+    if (lastCommandResult.error === 'Awaiting confirmation') {
+      // Destructive command needs confirmation
+      setLastFeedback(lastCommandResult.output);
+    } else if (lastCommandResult.success) {
+      // Show success output (truncated for display)
+      const output = lastCommandResult.output.length > 200
+        ? lastCommandResult.output.slice(0, 200) + '...'
+        : lastCommandResult.output;
+      setLastFeedback(output);
+    } else {
+      // Show error
+      setLastFeedback(`Error: ${lastCommandResult.error ?? lastCommandResult.output}`);
+    }
+
+    // Clear feedback after 8 seconds
+    const timer = setTimeout(() => setLastFeedback(null), 8000);
+    return () => clearTimeout(timer);
+  }, [lastCommandResult, setProcessing]);
+
+  // Find the PC Agent in remote users (exclude bot users)
+  const pcUserId = remoteUsers.find((id) => !id.startsWith('bot_') && !id.startsWith('mobile_')) ?? 'pc-agent';
 
   return (
     <View style={styles.container}>

@@ -38,13 +38,18 @@ export async function executeShell(command: CommandPayload): Promise<CommandResu
   }
 
   if (!check.allowed && check.requiresConfirmation) {
+    // If already confirmed via voice pipeline, skip confirmation
+    if (command.parameters['confirmed'] === true) {
+      return runShellCommand(command);
+    }
+
     // Needs voice confirmation
     pendingConfirmation.set(command.commandId, command);
     return {
       commandId: command.commandId,
       success: false,
       output: '',
-      error: `${ErrorCode.EXEC_CONFIRMATION_REQUIRED}: ${check.reason}`,
+      error: 'Confirmation required',
       durationMs: Date.now() - startTime,
       timestamp: Date.now(),
     };

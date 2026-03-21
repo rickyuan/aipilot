@@ -38,3 +38,13 @@ export interface CommandResult {
   /** Timestamp when the result was created */
   timestamp: number;
 }
+
+/**
+ * WebSocket relay message types for Cloud ↔ PC Agent communication.
+ */
+export type WsMessage =
+  | { type: 'utterance'; text: string; roomId: string }
+  | { type: 'command_result'; result: CommandResult; roomId: string }
+  | { type: 'bot_feedback'; text: string; roomId: string }
+  | { type: 'ping' }
+  | { type: 'pong' };

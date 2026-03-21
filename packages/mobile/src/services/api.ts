@@ -1,10 +1,16 @@
 /**
  * API client for the Cloud Orchestrator.
+ *
+ * In development, uses localhost. Configure CLOUD_URL for production.
  */
 
 import type { Session, TRTCRoomConfig } from '@deskpilot/shared';
 
-const API_BASE = 'http://localhost:3000'; // TODO: configurable
+// In React Native, localhost refers to the device itself.
+// For iOS simulator, use localhost. For physical device, use the host machine's IP.
+const API_BASE = __DEV__
+  ? 'http://localhost:3000'
+  : 'https://your-cloud-server.com'; // TODO: configure for production
 
 interface SessionResponse {
   session: Session;

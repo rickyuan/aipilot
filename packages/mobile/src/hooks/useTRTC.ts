@@ -1,17 +1,20 @@
 /**
  * Custom hook for TRTC room connection and stream management.
  *
+ * Manages TRTC connection lifecycle with real event listeners.
  * Uses trtc-react-native (NOT the web SDK).
  */
 
-import { useState, useEffect, useCallback } from 'react';
-import type { TRTCRoomConfig } from '@deskpilot/shared';
-import { initTRTC, joinRoom, leaveRoom, startMicCapture, stopMicCapture } from '../services/trtc';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import type { TRTCRoomConfig, CommandResult } from '@deskpilot/shared';
+import { initTRTC, joinRoom, leaveRoom, startMicCapture, stopMicCapture, trtcEvents } from '../services/trtc';
+import type { TRTCEvent } from '../services/trtc';
 
 interface UseTRTCState {
   connected: boolean;
   remoteUsers: string[];
   error: string | null;
+  lastCommandResult: CommandResult | null;
 }
 
 interface UseTRTCActions {
@@ -27,6 +30,33 @@ export function useTRTC(): UseTRTCState & UseTRTCActions {
   const [connected, setConnected] = useState(false);
   const [remoteUsers, setRemoteUsers] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [lastCommandResult, setLastCommandResult] = useState<CommandResult | null>(null);
+  const connectedRef = useRef(false);
+
+  // Listen for TRTC events
+  useEffect(() => {
+    const handler = (event: TRTCEvent): void => {
+      switch (event.type) {
+        case 'onRemoteUserEnterRoom':
+          setRemoteUsers((prev) => [...prev.filter((id) => id !== event.userId), event.userId]);
+          break;
+        case 'onRemoteUserLeaveRoom':
+          setRemoteUsers((prev) => prev.filter((id) => id !== event.userId));
+          break;
+        case 'onCommandResult':
+          setLastCommandResult(event.result);
+          break;
+        case 'onError':
+          setError(`TRTC Error ${String(event.code)}: ${event.message}`);
+          break;
+      }
+    };
+
+    trtcEvents.on('event', handler);
+    return () => {
+      trtcEvents.off('event', handler);
+    };
+  }, []);
 
   const connect = useCallback((config: TRTCRoomConfig) => {
     try {
@@ -34,12 +64,8 @@ export function useTRTC(): UseTRTCState & UseTRTCActions {
       joinRoom(config);
       startMicCapture();
       setConnected(true);
+      connectedRef.current = true;
       setError(null);
-
-      // TODO: Register TRTC event listeners for:
-      // - onRemoteUserEnterRoom → update remoteUsers
-      // - onRemoteUserLeaveRoom → update remoteUsers
-      // - onRecvCustomCmdMsg → handle command results
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Connection failed';
       setError(message);
@@ -50,18 +76,19 @@ export function useTRTC(): UseTRTCState & UseTRTCActions {
     stopMicCapture();
     leaveRoom();
     setConnected(false);
+    connectedRef.current = false;
     setRemoteUsers([]);
   }, []);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (connected) {
+      if (connectedRef.current) {
         stopMicCapture();
         leaveRoom();
       }
     };
-  }, [connected]);
+  }, []);
 
-  return { connected, remoteUsers, error, connect, disconnect };
+  return { connected, remoteUsers, error, lastCommandResult, connect, disconnect };
 }

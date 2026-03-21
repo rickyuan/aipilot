@@ -6,6 +6,7 @@
  */
 
 import { EventEmitter } from 'node:events';
+import { cpus } from 'node:os';
 import type { TRTCRoomConfig, CommandPayload, CommandResult } from '@deskpilot/shared';
 import { EventName, isWithinMessageLimit } from '@deskpilot/shared';
 
@@ -31,6 +32,24 @@ function tryLoadTRTC(): unknown {
 }
 
 /**
+ * Calculates current CPU usage percentage.
+ * @returns CPU usage as a percentage (0-100)
+ */
+function getCpuUsage(): number {
+  const cpuList = cpus();
+  let totalIdle = 0;
+  let totalTick = 0;
+
+  for (const cpu of cpuList) {
+    const times = cpu.times;
+    totalIdle += times.idle;
+    totalTick += times.user + times.nice + times.sys + times.idle + times.irq;
+  }
+
+  return Math.round(((totalTick - totalIdle) / totalTick) * 100);
+}
+
+/**
  * Joins a TRTC room with the given configuration.
  * @param roomConfig - TRTC room configuration (from Cloud API)
  */
@@ -52,6 +71,19 @@ export async function joinRoom(roomConfig: TRTCRoomConfig): Promise<void> {
       console.error(`[TRTC] Error ${String(errCode)}: ${String(errMsg)}`);
     });
 
+    cloud.on('onRemoteUserEnterRoom', (userId: unknown) => {
+      console.log(`[TRTC] Remote user joined: ${String(userId)}`);
+      roomEvents.emit(EventName.ROOM_PARTICIPANT_JOINED, {
+        userId: String(userId),
+        role: String(userId).startsWith('bot_') ? 'ai-bot' : 'mobile',
+      });
+    });
+
+    cloud.on('onRemoteUserLeaveRoom', (userId: unknown) => {
+      console.log(`[TRTC] Remote user left: ${String(userId)}`);
+      roomEvents.emit(EventName.ROOM_PARTICIPANT_LEFT, { userId: String(userId) });
+    });
+
     cloud.on('onRecvCustomCmdMsg', (_userId: unknown, _cmdId: unknown, _seq: unknown, msg: unknown) => {
       try {
         const command = JSON.parse(String(msg)) as CommandPayload;
@@ -61,10 +93,11 @@ export async function joinRoom(roomConfig: TRTCRoomConfig): Promise<void> {
       }
     });
 
+    // Use strRoomId for string-based room IDs (not numeric roomId)
     cloud.enterRoom(
       {
         sdkAppId: roomConfig.sdkAppId,
-        roomId: roomConfig.roomId,
+        strRoomId: roomConfig.roomId,
         userId: roomConfig.userId,
         userSig: roomConfig.userSig,
       },
@@ -83,7 +116,7 @@ export async function joinRoom(roomConfig: TRTCRoomConfig): Promise<void> {
 
 /**
  * Starts screen capture and publishes to the TRTC room.
- * Default: screen-1080p. Falls back to 720p if CPU > 70%.
+ * Uses 1080p by default, falls back to 720p if CPU > 70%.
  */
 export async function startScreenCapture(): Promise<void> {
   if (!currentRoomConfig) {
@@ -117,13 +150,17 @@ export async function startScreenCapture(): Promise<void> {
         { captureMouseCursor: true, enableHighLight: false },
       );
 
+      // CPU-adaptive resolution: 1080p default, 720p if CPU > 70%
+      const cpuUsage = getCpuUsage();
+      const use720p = cpuUsage > 70;
+
       cloud.startScreenCapture(null, 1, { // TRTCVideoStreamTypeSub
-        videoResolution: 104, // TRTCVideoResolution_1920_1080
+        videoResolution: use720p ? 66 : 104, // 1280x720 or 1920x1080
         videoFps: 15,
-        videoBitrate: 2000,
+        videoBitrate: use720p ? 1200 : 2000,
       });
 
-      console.log('[TRTC] Screen capture started (1080p)');
+      console.log(`[TRTC] Screen capture started (${use720p ? '720p - high CPU' : '1080p'})`);
     }
   } else {
     console.log('[TRTC] Screen capture started (mock)');
@@ -150,6 +187,10 @@ export function sendCommandResult(result: CommandResult): void {
   sendResultPayload(result);
 }
 
+/**
+ * Sends a result payload via TRTC custom message.
+ * @param result - The command result to send
+ */
 function sendResultPayload(result: CommandResult): void {
   if (trtcCloud) {
     const cloud = trtcCloud as {

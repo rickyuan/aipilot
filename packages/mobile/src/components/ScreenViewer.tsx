@@ -1,12 +1,14 @@
 /**
  * Screen viewer component — renders the remote PC screen share.
  *
- * In production, this renders the TRTC remote video stream.
- * For now, shows a placeholder until trtc-react-native is linked.
+ * Uses TRTCVideoView from trtc-react-native when the native module is linked.
+ * Falls back to a placeholder when TRTC is in mock mode.
  */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { isNativeModuleAvailable, trtcEvents } from '../services/trtc';
+import type { TRTCEvent } from '../services/trtc';
 
 interface ScreenViewerProps {
   /** TRTC userId of the PC Agent publishing the screen */
@@ -15,7 +17,37 @@ interface ScreenViewerProps {
   connected: boolean;
 }
 
+/**
+ * Dynamically loads TRTCVideoView if available.
+ */
+function getTRTCVideoView(): React.ComponentType<Record<string, unknown>> | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('trtc-react-native');
+    return mod.TRTCVideoView ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function ScreenViewer({ pcUserId, connected }: ScreenViewerProps): React.JSX.Element {
+  const [videoAvailable, setVideoAvailable] = useState(false);
+  const TRTCVideoView = isNativeModuleAvailable() ? getTRTCVideoView() : null;
+
+  // Listen for video availability events
+  useEffect(() => {
+    const handler = (event: TRTCEvent): void => {
+      if (event.type === 'onUserVideoAvailable' && event.userId === pcUserId) {
+        setVideoAvailable(event.available);
+      }
+    };
+
+    trtcEvents.on('event', handler);
+    return () => {
+      trtcEvents.off('event', handler);
+    };
+  }, [pcUserId]);
+
   if (!connected) {
     return (
       <View style={styles.container}>
@@ -25,16 +57,21 @@ export function ScreenViewer({ pcUserId, connected }: ScreenViewerProps): React.
     );
   }
 
-  // TODO: Replace with actual TRTCVideoView when native module is linked
-  // import { TRTCVideoView } from 'trtc-react-native';
-  // return (
-  //   <TRTCVideoView
-  //     userId={pcUserId}
-  //     streamType={TRTCVideoStreamType.Sub} // screen share stream
-  //     style={styles.container}
-  //   />
-  // );
+  // Real TRTC video view
+  if (TRTCVideoView && videoAvailable) {
+    return (
+      <View style={styles.container}>
+        <TRTCVideoView
+          userId={pcUserId}
+          streamType={2}
+          style={styles.videoView}
+          renderMode={1}
+        />
+      </View>
+    );
+  }
 
+  // Fallback placeholder
   return (
     <View style={styles.container}>
       <View style={styles.mockScreen}>
@@ -42,7 +79,9 @@ export function ScreenViewer({ pcUserId, connected }: ScreenViewerProps): React.
           Connected to {pcUserId}
         </Text>
         <Text style={styles.hint}>
-          Screen share will render here when TRTC native module is linked
+          {isNativeModuleAvailable()
+            ? 'Waiting for PC screen share...'
+            : 'TRTC native module not linked — screen share will appear when linked'}
         </Text>
       </View>
     </View>
@@ -55,6 +94,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  videoView: {
+    width: '100%',
+    height: '100%',
   },
   mockScreen: {
     width: '90%',

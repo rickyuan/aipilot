@@ -28,6 +28,19 @@ const ALLOWED_COMMANDS: ReadonlySet<string> = new Set([
   'python3',
   'pip',
   'pip3',
+  'lsof',
+  'ps',
+  'top',
+  'touch',
+  'wc',
+  'grep',
+  'find',
+  'df',
+  'du',
+  'env',
+  'uname',
+  'hostname',
+  'brew',
 ]);
 
 /** Commands that require voice confirmation before execution */

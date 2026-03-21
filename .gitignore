@@ -30,3 +30,15 @@ coverage/
 
 # DeskPilot local data
 .deskpilot/
+
+# React Native / iOS
+packages/mobile/ios/Pods/
+packages/mobile/ios/build/
+packages/mobile/ios/DeskPilot.xcworkspace/xcuserdata/
+packages/mobile/ios/DeskPilot.xcodeproj/xcuserdata/
+
+# React Native / Android
+packages/mobile/android/.gradle/
+packages/mobile/android/app/build/
+packages/mobile/android/build/
+packages/mobile/android/local.properties

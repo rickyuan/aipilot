@@ -11,6 +11,8 @@ import { config } from './config.js';
 import { sessionRouter } from './routes/sessions.js';
 import { pairingRouter } from './routes/pairing.js';
 import { roomRouter } from './routes/rooms.js';
+import { cleanupTimedOutSessions } from './services/room-service.js';
+import { cleanupExpiredPairings } from './services/pairing-service.js';
 
 const app = express();
 
@@ -33,6 +35,12 @@ app.listen(config.PORT, () => {
   console.log(`[Cloud] DeskPilot Cloud Orchestrator listening on port ${String(config.PORT)}`);
   console.log(`[Cloud] TRTC SDKAppID: ${String(config.TRTC_SDK_APP_ID)}`);
   console.log(`[Cloud] Log level: ${config.DESKPILOT_LOG_LEVEL}`);
+
+  // Periodic cleanup every 5 minutes
+  setInterval(() => {
+    cleanupTimedOutSessions().catch(console.error);
+    cleanupExpiredPairings().catch(console.error);
+  }, 5 * 60 * 1000);
 });
 
 export { app };

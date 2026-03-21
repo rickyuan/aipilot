@@ -22,42 +22,50 @@ const verifySchema = z.object({
 });
 
 /** POST /api/pairing/generate — PC requests a pairing code */
-pairingRouter.post('/generate', (req, res) => {
+pairingRouter.post('/generate', async (req, res) => {
   const parsed = generateSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid input', issues: parsed.error.issues });
     return;
   }
 
-  const pairing = generatePairingCode(parsed.data.pcUserId);
-  res.status(201).json({ pairingCode: pairing.pairingCode, expiresAt: pairing.expiresAt });
+  try {
+    const pairing = await generatePairingCode(parsed.data.pcUserId);
+    res.status(201).json({ pairingCode: pairing.pairingCode, expiresAt: pairing.expiresAt });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ error: message });
+  }
 });
 
 /** POST /api/pairing/verify — Mobile verifies a pairing code */
-pairingRouter.post('/verify', (req, res) => {
+pairingRouter.post('/verify', async (req, res) => {
   const parsed = verifySchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid input', issues: parsed.error.issues });
     return;
   }
 
-  const pairing = verifyPairingCode(parsed.data.pairingCode);
-  if (!pairing) {
-    res.status(400).json({ error: 'Invalid or expired pairing code' });
-    return;
+  try {
+    const pairing = await verifyPairingCode(parsed.data.pairingCode);
+    if (!pairing) {
+      res.status(400).json({ error: 'Invalid or expired pairing code' });
+      return;
+    }
+
+    const roomId = `dp_${pairing.pcUserId}_paired`;
+    const mobileRoomConfig = generateRoomConfig(roomId, parsed.data.mobileUserId);
+    const pcRoomConfig = generateRoomConfig(roomId, pairing.pcUserId);
+
+    res.json({
+      message: 'Pairing successful',
+      roomId,
+      pcUserId: pairing.pcUserId,
+      mobileRoomConfig,
+      pcRoomConfig,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ error: message });
   }
-
-  // Generate TRTC room config for the mobile device
-  // The roomId will come from the session — for now use a deterministic one
-  const roomId = `dp_${pairing.pcUserId}_paired`;
-  const mobileRoomConfig = generateRoomConfig(roomId, parsed.data.mobileUserId);
-  const pcRoomConfig = generateRoomConfig(roomId, pairing.pcUserId);
-
-  res.json({
-    message: 'Pairing successful',
-    roomId,
-    pcUserId: pairing.pcUserId,
-    mobileRoomConfig,
-    pcRoomConfig,
-  });
 });

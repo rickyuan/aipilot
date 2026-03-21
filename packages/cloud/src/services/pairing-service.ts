@@ -1,44 +1,57 @@
 /**
- * Device pairing service.
+ * Device pairing service — Supabase-backed.
  *
- * TOTP-based 6-digit pairing codes.
+ * TOTP-based 6-digit pairing codes with persistent storage.
  * PC shows code, user enters on mobile. Expires in 5 minutes.
  */
 
 import { randomInt } from 'node:crypto';
 import type { DevicePairing } from '@deskpilot/shared';
+import { getSupabase } from '../db/supabase.js';
+import type { Database } from '../db/types.js';
+
+type PairingRow = Database['public']['Tables']['pairings']['Row'];
 
 const PAIRING_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
-
-/** In-memory store for active pairing codes (swap for Supabase later) */
-const activePairings = new Map<string, DevicePairing>();
 
 /**
  * Generates a 6-digit pairing code for the given PC user.
  * @param pcUserId - The userId of the PC that requested pairing
  * @returns The created DevicePairing
  */
-export function generatePairingCode(pcUserId: string): DevicePairing {
-  // Invalidate any existing pairing for this PC
-  for (const [code, pairing] of activePairings) {
-    if (pairing.pcUserId === pcUserId) {
-      activePairings.delete(code);
-    }
-  }
+export async function generatePairingCode(pcUserId: string): Promise<DevicePairing> {
+  // Invalidate any existing pairings for this PC
+  await getSupabase()
+    .from('pairings')
+    .update({ consumed: true })
+    .eq('pc_user_id', pcUserId)
+    .eq('consumed', false);
 
   const code = String(randomInt(100000, 999999));
   const now = Date.now();
+  const expiresAt = now + PAIRING_EXPIRY_MS;
 
-  const pairing: DevicePairing = {
+  const { error } = await getSupabase()
+    .from('pairings')
+    .insert({
+      pairing_code: code,
+      pc_user_id: pcUserId,
+      consumed: false,
+      expires_at: new Date(expiresAt).toISOString(),
+    });
+
+  if (error) {
+    console.error('[PairingService] Failed to create pairing:', error);
+    throw new Error(`Failed to create pairing: ${error.message}`);
+  }
+
+  return {
     pairingCode: code,
     pcUserId,
     createdAt: now,
-    expiresAt: now + PAIRING_EXPIRY_MS,
+    expiresAt,
     consumed: false,
   };
-
-  activePairings.set(code, pairing);
-  return pairing;
 }
 
 /**
@@ -46,37 +59,48 @@ export function generatePairingCode(pcUserId: string): DevicePairing {
  * @param code - The 6-digit pairing code
  * @returns The pairing if valid, null if invalid/expired
  */
-export function verifyPairingCode(code: string): DevicePairing | null {
-  const pairing = activePairings.get(code);
+export async function verifyPairingCode(code: string): Promise<DevicePairing | null> {
+  const now = new Date().toISOString();
 
-  if (!pairing) {
-    return null;
-  }
+  // Find valid, unconsumed, non-expired pairing
+  const { data, error } = await getSupabase()
+    .from('pairings')
+    .select('*')
+    .eq('pairing_code', code)
+    .eq('consumed', false)
+    .gt('expires_at', now)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
 
-  if (pairing.consumed) {
-    return null;
-  }
+  if (error || !data) return null;
 
-  if (Date.now() > pairing.expiresAt) {
-    activePairings.delete(code);
-    return null;
-  }
+  const row = data as PairingRow;
 
   // Mark as consumed
-  pairing.consumed = true;
-  activePairings.delete(code);
+  await getSupabase()
+    .from('pairings')
+    .update({ consumed: true })
+    .eq('id', row.id);
 
-  return pairing;
+  return {
+    pairingCode: row.pairing_code,
+    pcUserId: row.pc_user_id,
+    createdAt: new Date(row.created_at).getTime(),
+    expiresAt: new Date(row.expires_at).getTime(),
+    consumed: true,
+  };
 }
 
 /**
  * Cleans up expired pairing codes.
  */
-export function cleanupExpiredPairings(): void {
-  const now = Date.now();
-  for (const [code, pairing] of activePairings) {
-    if (now > pairing.expiresAt) {
-      activePairings.delete(code);
-    }
-  }
+export async function cleanupExpiredPairings(): Promise<void> {
+  const now = new Date().toISOString();
+
+  await getSupabase()
+    .from('pairings')
+    .delete()
+    .lt('expires_at', now)
+    .eq('consumed', false);
 }

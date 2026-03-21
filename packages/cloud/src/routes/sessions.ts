@@ -17,25 +17,26 @@ const createSessionSchema = z.object({
 });
 
 /** POST /api/sessions — Create a new session with TRTC room */
-sessionRouter.post('/', (req, res) => {
+sessionRouter.post('/', async (req, res) => {
   const parsed = createSessionSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid input', issues: parsed.error.issues });
     return;
   }
 
-  const session = createSession(parsed.data.userId);
-  const roomConfig = generateRoomConfig(session.roomId, parsed.data.userId);
-
-  res.status(201).json({
-    session,
-    roomConfig,
-  });
+  try {
+    const session = await createSession(parsed.data.userId);
+    const roomConfig = generateRoomConfig(session.roomId, parsed.data.userId);
+    res.status(201).json({ session, roomConfig });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ error: message });
+  }
 });
 
 /** GET /api/sessions/:id — Get session details */
-sessionRouter.get('/:id', (req, res) => {
-  const session = getSession(req.params['id'] ?? '');
+sessionRouter.get('/:id', async (req, res) => {
+  const session = await getSession(req.params['id'] ?? '');
   if (!session) {
     res.status(404).json({ error: 'Session not found' });
     return;
@@ -44,8 +45,8 @@ sessionRouter.get('/:id', (req, res) => {
 });
 
 /** POST /api/sessions/:id/end — End a session */
-sessionRouter.post('/:id/end', (req, res) => {
-  const ended = endSession(req.params['id'] ?? '');
+sessionRouter.post('/:id/end', async (req, res) => {
+  const ended = await endSession(req.params['id'] ?? '');
   if (!ended) {
     res.status(404).json({ error: 'Session not found' });
     return;

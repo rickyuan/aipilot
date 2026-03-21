@@ -9,6 +9,8 @@ import './config.js'; // Load env vars first
 import type { CommandPayload } from '@deskpilot/shared';
 import { joinRoom, startScreenCapture, onCommandReceived, sendCommandResult, simulateIncomingCommand } from './trtc/room.js';
 import { routeCommand } from './executors/router.js';
+import { processUtterance } from './intent/pipeline.js';
+import { createSession, generatePairingCode } from './cloud-client.js';
 
 /**
  * Handles incoming command payloads from the AI bot.
@@ -43,10 +45,61 @@ async function main(): Promise<void> {
     return;
   }
 
-  // In production: fetch room config from Cloud API and join
-  // For now, wait for room config to be provided
-  console.log('[Agent] Ready. Waiting for room configuration...');
-  console.log('[Agent] Run with --demo to test command execution locally');
+  // If started with --classify, run interactive intent classification
+  if (process.argv.includes('--classify')) {
+    await runClassifyDemo();
+    return;
+  }
+
+  // Production mode: connect to Cloud API, create session, show pairing code
+  await runProduction();
+}
+
+/**
+ * Production mode — connects to Cloud API, creates session,
+ * displays pairing code, and joins TRTC room.
+ */
+async function runProduction(): Promise<void> {
+  const pcUserId = `pc_${require('node:os').hostname()}_${Date.now()}`;
+
+  console.log(`[Agent] PC User ID: ${pcUserId}`);
+  console.log('[Agent] Connecting to Cloud API...');
+
+  try {
+    // Create session
+    const { session, roomConfig } = await createSession(pcUserId);
+    console.log(`[Agent] Session created: ${session.sessionId}`);
+    console.log(`[Agent] Room: ${session.roomId}`);
+
+    // Generate pairing code
+    const pairing = await generatePairingCode(pcUserId);
+    console.log('');
+    console.log('╔══════════════════════════════════════╗');
+    console.log('║                                      ║');
+    console.log(`║     Pairing Code:  ${pairing.pairingCode}            ║`);
+    console.log('║                                      ║');
+    console.log('║  Enter this code on your mobile app  ║');
+    console.log(`║  Expires: ${new Date(pairing.expiresAt).toLocaleTimeString()}                    ║`);
+    console.log('╚══════════════════════════════════════╝');
+    console.log('');
+
+    // Join TRTC room
+    await joinRoom(roomConfig);
+    await startScreenCapture();
+
+    console.log('[Agent] Waiting for mobile connection and voice commands...');
+    console.log('[Agent] Press Ctrl+C to stop');
+
+    // Keep process alive
+    await new Promise(() => {
+      // Process stays alive until Ctrl+C
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error(`[Agent] Failed to start: ${message}`);
+    console.log('[Agent] Make sure the Cloud server is running (pnpm dev:cloud)');
+    process.exit(1);
+  }
 }
 
 /**
@@ -122,6 +175,37 @@ async function runDemo(): Promise<void> {
 
   await sleep(2000);
   console.log('\n[Agent] Demo complete.');
+}
+
+/**
+ * Interactive intent classification demo.
+ * Tests the full pipeline: utterance → classify → command → execute.
+ */
+async function runClassifyDemo(): Promise<void> {
+  console.log('[Agent] Intent classification demo\n');
+
+  await joinRoom({ sdkAppId: 0, roomId: 'demo', userId: 'demo_pc', userSig: 'demo' });
+
+  const testUtterances = [
+    'Install express with npm',
+    'Create a React login component',
+    'What is running on port 3000',
+    'Open localhost:8080 in the browser',
+    'Yes, go ahead',
+    'Fix the bug in app.ts line 42',
+  ];
+
+  for (const utterance of testUtterances) {
+    console.log(`\n${'='.repeat(60)}`);
+    const result = await processUtterance(utterance, 'demo_hmac_key');
+    if (result) {
+      console.log(`[Result] success=${String(result.success)} output=${result.output.slice(0, 100)}`);
+    }
+    await sleep(500);
+  }
+
+  console.log(`\n${'='.repeat(60)}`);
+  console.log('[Agent] Classification demo complete.');
 }
 
 function sleep(ms: number): Promise<void> {

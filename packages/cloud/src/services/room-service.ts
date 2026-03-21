@@ -1,8 +1,8 @@
 /**
- * Room provisioning service.
+ * Room provisioning service — Supabase-backed.
  *
  * Creates TRTC rooms, generates UserSigs for participants,
- * and manages room lifecycle.
+ * and manages session lifecycle with persistent storage.
  */
 
 import type { Session, TRTCRoomConfig } from '@deskpilot/shared';
@@ -10,31 +10,47 @@ import { generateRoomId } from '@deskpilot/shared';
 import { randomBytes } from 'node:crypto';
 import { config } from '../config.js';
 import { generateUserSig } from '../trtc/usersig.js';
+import { getSupabase } from '../db/supabase.js';
+import type { Database } from '../db/types.js';
 
-/** In-memory store for active sessions (swap for Supabase later) */
-const activeSessions = new Map<string, Session>();
+type SessionRow = Database['public']['Tables']['sessions']['Row'];
 
 /**
  * Creates a new session with a TRTC room.
  * @param userId - The user who owns this session
  * @returns The created session
  */
-export function createSession(userId: string): Session {
+export async function createSession(userId: string): Promise<Session> {
   const roomId = generateRoomId(userId);
   const now = Date.now();
+  const sessionId = `sess_${now}_${randomBytes(4).toString('hex')}`;
+  const hmacKey = randomBytes(32).toString('hex');
 
-  const session: Session = {
-    sessionId: `sess_${now}_${randomBytes(4).toString('hex')}`,
+  const { error } = await getSupabase()
+    .from('sessions')
+    .insert({
+      id: sessionId,
+      user_id: userId,
+      room_id: roomId,
+      active: true,
+      hmac_key: hmacKey,
+      last_activity_at: new Date(now).toISOString(),
+    });
+
+  if (error) {
+    console.error('[RoomService] Failed to create session:', error);
+    throw new Error(`Failed to create session: ${error.message}`);
+  }
+
+  return {
+    sessionId,
     userId,
     roomId,
     active: true,
     createdAt: now,
     lastActivityAt: now,
-    hmacKey: randomBytes(32).toString('hex'),
+    hmacKey,
   };
-
-  activeSessions.set(session.sessionId, session);
-  return session;
 }
 
 /**
@@ -42,8 +58,26 @@ export function createSession(userId: string): Session {
  * @param sessionId - The session ID
  * @returns The session if found and active, null otherwise
  */
-export function getSession(sessionId: string): Session | null {
-  return activeSessions.get(sessionId) ?? null;
+export async function getSession(sessionId: string): Promise<Session | null> {
+  const { data, error } = await getSupabase()
+    .from('sessions')
+    .select('*')
+    .eq('id', sessionId)
+    .eq('active', true)
+    .single();
+
+  if (error || !data) return null;
+
+  const row = data as SessionRow;
+  return {
+    sessionId: row.id,
+    userId: row.user_id,
+    roomId: row.room_id,
+    active: row.active,
+    createdAt: new Date(row.created_at).getTime(),
+    lastActivityAt: new Date(row.last_activity_at).getTime(),
+    hmacKey: row.hmac_key,
+  };
 }
 
 /**
@@ -51,12 +85,16 @@ export function getSession(sessionId: string): Session | null {
  * @param sessionId - The session ID to end
  * @returns Whether the session was found and ended
  */
-export function endSession(sessionId: string): boolean {
-  const session = activeSessions.get(sessionId);
-  if (!session) return false;
+export async function endSession(sessionId: string): Promise<boolean> {
+  const { data, error } = await getSupabase()
+    .from('sessions')
+    .update({ active: false })
+    .eq('id', sessionId)
+    .eq('active', true)
+    .select('id')
+    .single();
 
-  session.active = false;
-  activeSessions.delete(sessionId);
+  if (error || !data) return false;
   return true;
 }
 
@@ -85,25 +123,27 @@ export function generateRoomConfig(roomId: string, userId: string): TRTCRoomConf
  * Updates session last activity timestamp.
  * @param sessionId - The session ID
  */
-export function touchSession(sessionId: string): void {
-  const session = activeSessions.get(sessionId);
-  if (session) {
-    session.lastActivityAt = Date.now();
-  }
+export async function touchSession(sessionId: string): Promise<void> {
+  await getSupabase()
+    .from('sessions')
+    .update({ last_activity_at: new Date().toISOString() })
+    .eq('id', sessionId);
 }
 
 /**
  * Cleans up timed-out sessions.
  */
-export function cleanupTimedOutSessions(): void {
-  const now = Date.now();
-  const timeoutMs = config.DESKPILOT_MAX_SESSION_MINUTES * 60 * 1000;
+export async function cleanupTimedOutSessions(): Promise<void> {
+  const cutoff = new Date(Date.now() - config.DESKPILOT_MAX_SESSION_MINUTES * 60 * 1000).toISOString();
 
-  for (const [id, session] of activeSessions) {
-    if (now - session.lastActivityAt > timeoutMs) {
-      session.active = false;
-      activeSessions.delete(id);
-      console.log(`[Cloud] Session ${id} timed out`);
-    }
+  const { data } = await getSupabase()
+    .from('sessions')
+    .update({ active: false })
+    .eq('active', true)
+    .lt('last_activity_at', cutoff)
+    .select('id');
+
+  if (data && data.length > 0) {
+    console.log(`[RoomService] Timed out ${String(data.length)} sessions`);
   }
 }

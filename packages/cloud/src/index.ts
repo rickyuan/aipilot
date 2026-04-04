@@ -6,6 +6,7 @@
  */
 
 import { createServer } from 'node:http';
+import { resolve } from 'node:path';
 import express from 'express';
 import cors from 'cors';
 import { config } from './config.js';
@@ -28,6 +29,9 @@ app.use(express.json());
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'deskpilot-cloud' });
 });
+
+// Mobile web client (served before API routes)
+app.use('/mobile', express.static(resolve(__dirname, '..', 'static'), { index: 'mobile.html' }));
 
 // API routes
 app.use('/api/sessions', sessionRouter);

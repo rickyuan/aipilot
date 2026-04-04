@@ -13,6 +13,10 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
+  Keyboard,
+  TouchableWithoutFeedback,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../types/navigation';
@@ -37,8 +41,9 @@ export function HomeScreen({ navigation }: Props): React.JSX.Element {
       const result = await verifyPairingCode(code, mobileUserId);
 
       navigation.navigate('Remote', {
-        sessionId: result.roomId,
         roomId: result.roomId,
+        pcUserId: result.pcUserId,
+        mobileRoomConfig: result.mobileRoomConfig,
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Pairing failed';
@@ -49,43 +54,49 @@ export function HomeScreen({ navigation }: Props): React.JSX.Element {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>DeskPilot</Text>
-        <Text style={styles.subtitle}>Control your PC with voice</Text>
-      </View>
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={styles.header}>
+          <Text style={styles.title}>DeskPilot</Text>
+          <Text style={styles.subtitle}>Control your PC with voice</Text>
+        </View>
 
-      <View style={styles.pairingCard}>
-        <Text style={styles.label}>Enter Pairing Code</Text>
-        <Text style={styles.hint}>
-          Open DeskPilot on your PC to see the 6-digit code
-        </Text>
+        <View style={styles.pairingCard}>
+          <Text style={styles.label}>Enter Pairing Code</Text>
+          <Text style={styles.hint}>
+            Open DeskPilot on your PC to see the 6-digit code
+          </Text>
 
-        <TextInput
-          style={styles.codeInput}
-          value={code}
-          onChangeText={setCode}
-          placeholder="000000"
-          placeholderTextColor="#555"
-          keyboardType="number-pad"
-          maxLength={6}
-          textAlign="center"
-          autoFocus
-        />
+          <TextInput
+            style={styles.codeInput}
+            value={code}
+            onChangeText={setCode}
+            placeholder="000000"
+            placeholderTextColor="#555"
+            keyboardType="number-pad"
+            maxLength={6}
+            textAlign="center"
+            returnKeyType="done"
+            onSubmitEditing={handlePair}
+          />
 
-        <TouchableOpacity
-          style={[styles.button, code.length !== 6 && styles.buttonDisabled]}
-          onPress={handlePair}
-          disabled={code.length !== 6 || loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>Connect</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-    </View>
+          <TouchableOpacity
+            style={[styles.button, code.length !== 6 && styles.buttonDisabled]}
+            onPress={handlePair}
+            disabled={code.length !== 6 || loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Connect</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    </TouchableWithoutFeedback>
   );
 }
 

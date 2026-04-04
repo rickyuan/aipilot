@@ -1,3 +1,8 @@
+# trtc-react-native 3.2.4 uses old RCT bridge (RCT_EXTERN_MODULE / RCTEventEmitter)
+# and is not compatible with RN New Architecture. Must be set BEFORE require so
+# the ||= in react_native_pods.rb preserves this value.
+ENV['RCT_NEW_ARCH_ENABLED'] = '0'
+
 # Resolve react_native_pods.rb with node to allow for hoisting
 require Pod::Executable.execute_command('node', ['-p',
   'require.resolve(

@@ -1,44 +1,46 @@
 /**
  * Screen viewer component — renders the remote PC screen share.
  *
- * Uses TRTCVideoView from trtc-react-native when the native module is linked.
+ * Subscribes to the sub-stream (screen share) from the PC user.
+ * The PC publishes screen via TRTC Web SDK startScreenShare() which
+ * uses STREAM_TYPE_SUB. On native SDK, this triggers onUserSubStreamAvailable.
+ *
+ * Uses TXVideoView.RemoteView from trtc-react-native when available.
  * Falls back to a placeholder when TRTC is in mock mode.
  */
 
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { isNativeModuleAvailable, trtcEvents } from '../services/trtc';
+import { isNativeModuleAvailable, getTXVideoView, trtcEvents } from '../services/trtc';
 import type { TRTCEvent } from '../services/trtc';
 
 interface ScreenViewerProps {
   /** TRTC userId of the PC Agent publishing the screen */
   pcUserId: string;
-  /** Whether the stream is connected and rendering */
+  /** Whether the TRTC room is connected */
   connected: boolean;
 }
 
 /**
- * Dynamically loads TRTCVideoView if available.
+ * Displays the PC's screen share stream.
+ * @param props - Component props
+ * @returns Screen viewer element
  */
-function getTRTCVideoView(): React.ComponentType<Record<string, unknown>> | null {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require('trtc-react-native');
-    return mod.TRTCVideoView ?? null;
-  } catch {
-    return null;
-  }
-}
-
 export function ScreenViewer({ pcUserId, connected }: ScreenViewerProps): React.JSX.Element {
-  const [videoAvailable, setVideoAvailable] = useState(false);
-  const TRTCVideoView = isNativeModuleAvailable() ? getTRTCVideoView() : null;
+  const [screenAvailable, setScreenAvailable] = useState(false);
+  const TXVideoView = isNativeModuleAvailable() ? getTXVideoView() : null;
+  const RemoteView = TXVideoView?.RemoteView ?? null;
 
-  // Listen for video availability events
+  // Listen for screen share (sub stream) availability from any user ending with _screen
   useEffect(() => {
     const handler = (event: TRTCEvent): void => {
-      if (event.type === 'onUserVideoAvailable' && event.userId === pcUserId) {
-        setVideoAvailable(event.available);
+      // Screen share comes as sub stream from {pcUserId}_screen user
+      if (event.type === 'onUserSubStreamAvailable') {
+        setScreenAvailable(event.available);
+      }
+      // Also handle main stream video as fallback
+      if (event.type === 'onUserVideoAvailable' && event.userId.endsWith('_screen')) {
+        setScreenAvailable(event.available);
       }
     };
 
@@ -57,12 +59,12 @@ export function ScreenViewer({ pcUserId, connected }: ScreenViewerProps): React.
     );
   }
 
-  // Real TRTC video view
-  if (TRTCVideoView && videoAvailable) {
+  // Real TRTC remote video view — sub stream (screen share)
+  if (RemoteView && screenAvailable) {
     return (
       <View style={styles.container}>
-        <TRTCVideoView
-          userId={pcUserId}
+        <RemoteView
+          userId={`${pcUserId}_screen`}
           streamType={2}
           style={styles.videoView}
           renderMode={1}
@@ -76,7 +78,7 @@ export function ScreenViewer({ pcUserId, connected }: ScreenViewerProps): React.
     <View style={styles.container}>
       <View style={styles.mockScreen}>
         <Text style={styles.connectedText}>
-          Connected to {pcUserId}
+          Connected to room
         </Text>
         <Text style={styles.hint}>
           {isNativeModuleAvailable()

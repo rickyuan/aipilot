@@ -24,6 +24,6 @@
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",
-    "electron": "^41.0.3"
+    "electron": "^33.4.11"
   }
 }

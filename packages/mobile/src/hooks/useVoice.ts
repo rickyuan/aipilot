@@ -1,8 +1,8 @@
 /**
- * Custom hook for voice input management.
+ * Custom hook for voice input UI state.
  *
- * Handles mic activation state and voice activity detection.
- * Integrates with the TRTC service for actual mic control.
+ * In TRTC Conversational AI mode, the mic is always on after room join.
+ * The bot handles ASR/TTS automatically. This hook only tracks UI state.
  */
 
 import { useState, useCallback } from 'react';
@@ -16,18 +16,19 @@ interface UseVoiceState {
 interface UseVoiceActions {
   toggleMic: () => void;
   setProcessing: (processing: boolean) => void;
+  setMicActive: (active: boolean) => void;
 }
 
 /**
- * Hook for managing voice input UI state with real TRTC mic control.
+ * Hook for managing voice input UI state.
  * @returns Mic state and control actions
  */
 export function useVoice(): UseVoiceState & UseVoiceActions {
-  const [isMicActive, setMicActive] = useState(false);
+  const [isMicActive, setIsMicActive] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
   const toggleMic = useCallback(() => {
-    setMicActive((prev) => {
+    setIsMicActive((prev) => {
       const next = !prev;
       if (next) {
         startMicCapture();
@@ -42,5 +43,9 @@ export function useVoice(): UseVoiceState & UseVoiceActions {
     setIsProcessing(processing);
   }, []);
 
-  return { isMicActive, isProcessing, toggleMic, setProcessing };
+  const setMicActive = useCallback((active: boolean) => {
+    setIsMicActive(active);
+  }, []);
+
+  return { isMicActive, isProcessing, toggleMic, setProcessing, setMicActive };
 }

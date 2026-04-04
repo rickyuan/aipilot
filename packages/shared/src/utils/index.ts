@@ -9,11 +9,18 @@ export function generateRoomId(userId: string): string {
 
 /**
  * Generates a bot userId for a given room.
+ * TRTC userId max length is 32 chars, so we hash the roomId.
  * @param roomId - The TRTC room ID
- * @returns Bot userId in format bot_{roomId}
+ * @returns Bot userId in format bot_{hash} (max 32 chars)
  */
 export function generateBotUserId(roomId: string): string {
-  return `bot_${roomId}`;
+  // Simple hash to keep userId short — take last 24 chars of a numeric hash
+  let hash = 0;
+  for (let i = 0; i < roomId.length; i++) {
+    hash = ((hash << 5) - hash + roomId.charCodeAt(i)) | 0;
+  }
+  const suffix = Math.abs(hash).toString(36);
+  return `bot_${suffix}_${Date.now().toString(36).slice(-6)}`;
 }
 
 /**

@@ -8,7 +8,7 @@
 import { Router } from 'express';
 import { z } from 'zod/v4';
 import { generatePairingCode, verifyPairingCode } from '../services/pairing-service.js';
-import { generateRoomConfig } from '../services/room-service.js';
+import { generateRoomConfig, getActiveSessionByUserId } from '../services/room-service.js';
 import { createBot, hasBotInRoom } from '../services/bot-service.js';
 
 export const pairingRouter = Router();
@@ -48,27 +48,39 @@ pairingRouter.post('/verify', async (req, res) => {
   }
 
   try {
+    console.log(`[Pairing] Verifying code: ${parsed.data.pairingCode} for mobile: ${parsed.data.mobileUserId}`);
+
     const pairing = await verifyPairingCode(parsed.data.pairingCode);
     if (!pairing) {
+      console.log(`[Pairing] Code ${parsed.data.pairingCode} is invalid or expired`);
       res.status(400).json({ error: 'Invalid or expired pairing code' });
       return;
     }
 
-    const roomId = `dp_${pairing.pcUserId}_paired`;
+    console.log(`[Pairing] Code valid, PC user: ${pairing.pcUserId}`);
+
+    // Use the PC agent's existing session room so all participants share one TRTC room
+    const activeSession = await getActiveSessionByUserId(pairing.pcUserId);
+    const roomId = activeSession?.roomId ?? `dp_${pairing.pcUserId}_paired`;
+    console.log(`[Pairing] Room: ${roomId} (from ${activeSession ? 'active session' : 'generated'})`);
+
     const mobileRoomConfig = generateRoomConfig(roomId, parsed.data.mobileUserId);
     const pcRoomConfig = generateRoomConfig(roomId, pairing.pcUserId);
 
-    // Auto-create AI bot in the room on successful pairing
+    // Auto-create AI bot in the room on successful pairing, targeting mobile user
     if (!hasBotInRoom(roomId)) {
       try {
-        await createBot(roomId);
-        console.log(`[Cloud] Bot auto-created for room ${roomId} after pairing`);
+        const botResult = await createBot(roomId, parsed.data.mobileUserId);
+        console.log(`[Pairing] Bot created for room ${roomId}, taskId: ${botResult.taskId}`);
       } catch (botErr: unknown) {
-        // Bot creation failure shouldn't block pairing
         const botMsg = botErr instanceof Error ? botErr.message : 'Unknown';
-        console.warn(`[Cloud] Bot creation failed for room ${roomId}: ${botMsg}`);
+        console.error(`[Pairing] Bot creation FAILED for room ${roomId}: ${botMsg}`);
       }
+    } else {
+      console.log(`[Pairing] Bot already exists in room ${roomId}`);
     }
+
+    console.log(`[Pairing] Success! Mobile config: sdkAppId=${String(mobileRoomConfig.sdkAppId)}, room=${mobileRoomConfig.roomId}, user=${mobileRoomConfig.userId}`);
 
     res.json({
       message: 'Pairing successful',

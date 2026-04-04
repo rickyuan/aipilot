@@ -8,8 +8,14 @@ import type { Session, TRTCRoomConfig } from '@deskpilot/shared';
 
 // In React Native, localhost refers to the device itself.
 // For iOS simulator, use localhost. For physical device, use the host machine's IP.
+import { Platform } from 'react-native';
+
+const DEV_HOST = Platform.OS === 'ios' && !Platform.isTV
+  ? '192.168.1.12'  // Mac's LAN IP for real device; change if your IP differs
+  : 'localhost';
+
 const API_BASE = __DEV__
-  ? 'http://localhost:3000'
+  ? `http://${DEV_HOST}:3000`
   : 'https://your-cloud-server.com'; // TODO: configure for production
 
 interface SessionResponse {

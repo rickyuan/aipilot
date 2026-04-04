@@ -120,6 +120,35 @@ export function generateRoomConfig(roomId: string, userId: string): TRTCRoomConf
 }
 
 /**
+ * Gets an active session for a user by userId.
+ * @param userId - The user ID to look up
+ * @returns The active session if found, null otherwise
+ */
+export async function getActiveSessionByUserId(userId: string): Promise<Session | null> {
+  const { data, error } = await getSupabase()
+    .from('sessions')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('active', true)
+    .order('last_activity_at', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (error || !data) return null;
+
+  const row = data as SessionRow;
+  return {
+    sessionId: row.id,
+    userId: row.user_id,
+    roomId: row.room_id,
+    active: row.active,
+    createdAt: new Date(row.created_at).getTime(),
+    lastActivityAt: new Date(row.last_activity_at).getTime(),
+    hmacKey: row.hmac_key,
+  };
+}
+
+/**
  * Updates session last activity timestamp.
  * @param sessionId - The session ID
  */

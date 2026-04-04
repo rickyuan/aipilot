@@ -63,5 +63,5 @@ function base64UrlEncode(buffer: Buffer): string {
     .toString('base64')
     .replace(/\+/g, '*')
     .replace(/\//g, '-')
-    .replace(/=+$/, '');
+    .replace(/=/g, '_');
 }

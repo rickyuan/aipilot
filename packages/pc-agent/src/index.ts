@@ -13,12 +13,14 @@
 
 import './config.js'; // Load env vars first
 import { hostname } from 'node:os';
+import { exec } from 'node:child_process';
 import type { CommandPayload } from '@deskpilot/shared';
 import { joinRoom, startScreenCapture, onCommandReceived, sendCommandResult, simulateIncomingCommand } from './trtc/room.js';
 import { routeCommand } from './executors/router.js';
 import { processUtterance } from './intent/pipeline.js';
 import { createSession, generatePairingCode } from './cloud-client.js';
 import { connectToCloudWs } from './cloud-ws.js';
+import { startScreenServer, setScreenShareConfig, setPcUserId } from './screen-server.js';
 
 /**
  * Handles incoming command payloads from the AI bot.
@@ -98,9 +100,41 @@ async function runProduction(): Promise<void> {
     console.log('======================================');
     console.log('');
 
-    // Join TRTC room
+    // Join TRTC room (mock mode — real screen share handled by browser)
     await joinRoom(roomConfig);
-    await startScreenCapture();
+
+    // Start local screen share server and open browser
+    const screenPort = 8089;
+    startScreenServer(screenPort);
+    setPcUserId(pcUserId);
+    setScreenShareConfig(roomConfig, pairing.pairingCode);
+
+    // Generate a separate screen-share user config for the browser
+    // The browser joins the same room as a screen-share publisher
+    const screenUserId = `${pcUserId}_screen`;
+    try {
+      const cloudUrl = process.env['CLOUD_URL'] ?? 'http://localhost:3000';
+      const configRes = await fetch(`${cloudUrl}/api/rooms/${encodeURIComponent(session.roomId)}/config?userId=${encodeURIComponent(screenUserId)}`);
+      if (configRes.ok) {
+        const { roomConfig: screenConfig } = await configRes.json() as { roomConfig: typeof roomConfig };
+        setScreenShareConfig(screenConfig, pairing.pairingCode);
+        console.log(`[Agent] Screen share user: ${screenUserId}`);
+      }
+    } catch {
+      // Fall back to the original room config for screen share
+      console.log('[Agent] Using agent room config for screen share');
+    }
+
+    // Auto-open browser for screen sharing
+    const screenUrl = `http://localhost:${String(screenPort)}`;
+    console.log(`[Agent] Opening screen share page: ${screenUrl}`);
+    if (process.platform === 'darwin') {
+      exec(`open "${screenUrl}"`);
+    } else if (process.platform === 'win32') {
+      exec(`start "${screenUrl}"`);
+    } else {
+      exec(`xdg-open "${screenUrl}"`);
+    }
 
     // Connect to Cloud WebSocket relay for voice command pipeline
     connectToCloudWs(session.roomId, pcUserId, session.hmacKey);
@@ -132,7 +166,7 @@ async function runLocal(): Promise<void> {
 
   try {
     // Create session
-    const { session } = await createSession(pcUserId);
+    const { session, roomConfig } = await createSession(pcUserId);
     console.log(`[Agent] Session: ${session.sessionId}`);
 
     // Generate pairing code
@@ -140,6 +174,31 @@ async function runLocal(): Promise<void> {
     console.log('');
     console.log(`  Pairing Code: ${pairing.pairingCode}`);
     console.log('');
+
+    // Start local screen share server
+    const screenPort = 8089;
+    startScreenServer(screenPort);
+    setPcUserId(pcUserId);
+
+    // Generate screen-share user config
+    const screenUserId = `${pcUserId}_screen`;
+    try {
+      const cloudUrl = process.env['CLOUD_URL'] ?? 'http://localhost:3000';
+      const configRes = await fetch(`${cloudUrl}/api/rooms/${encodeURIComponent(session.roomId)}/config?userId=${encodeURIComponent(screenUserId)}`);
+      if (configRes.ok) {
+        const { roomConfig: screenConfig } = await configRes.json() as { roomConfig: typeof roomConfig };
+        setScreenShareConfig(screenConfig, pairing.pairingCode);
+      }
+    } catch {
+      setScreenShareConfig(roomConfig, pairing.pairingCode);
+    }
+
+    // Auto-open browser
+    const screenUrl = `http://localhost:${String(screenPort)}`;
+    console.log(`[Agent] Screen share page: ${screenUrl}`);
+    if (process.platform === 'darwin') {
+      exec(`open "${screenUrl}"`);
+    }
 
     // Connect to Cloud WebSocket relay (no TRTC room join)
     connectToCloudWs(session.roomId, pcUserId, session.hmacKey);

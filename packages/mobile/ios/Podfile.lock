@@ -1401,74 +1401,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
   - react-native-safe-area-context (5.7.0):
-    - hermes-engine
-    - RCTRequired
-    - RCTTypeSafety
     - React-Core
-    - React-Core-prebuilt
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-ImageManager
-    - React-jsi
-    - react-native-safe-area-context/common (= 5.7.0)
-    - react-native-safe-area-context/fabric (= 5.7.0)
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - ReactNativeDependencies
-    - Yoga
-  - react-native-safe-area-context/common (5.7.0):
-    - hermes-engine
-    - RCTRequired
-    - RCTTypeSafety
-    - React-Core
-    - React-Core-prebuilt
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-ImageManager
-    - React-jsi
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - ReactNativeDependencies
-    - Yoga
-  - react-native-safe-area-context/fabric (5.7.0):
-    - hermes-engine
-    - RCTRequired
-    - RCTTypeSafety
-    - React-Core
-    - React-Core-prebuilt
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-ImageManager
-    - React-jsi
-    - react-native-safe-area-context/common
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - ReactNativeDependencies
-    - Yoga
   - React-NativeModulesApple (0.84.1):
     - hermes-engine
     - React-callinvoker
@@ -1876,9 +1809,8 @@ PODS:
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
-    - RNScreens/common (= 4.24.0)
     - Yoga
-  - RNScreens/common (4.24.0):
+  - trtc-react-native (3.2.4):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1892,7 +1824,6 @@ PODS:
     - React-jsi
     - React-NativeModulesApple
     - React-RCTFabric
-    - React-RCTImage
     - React-renderercss
     - React-rendererdebug
     - React-utils
@@ -1900,7 +1831,11 @@ PODS:
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
+    - TXLiteAVSDK_Professional (~> 12.8.19666)
     - Yoga
+  - TXLiteAVSDK_Professional (12.8.19666):
+    - TXLiteAVSDK_Professional/Professional (= 12.8.19666)
+  - TXLiteAVSDK_Professional/Professional (12.8.19666)
   - Yoga (0.0.0)
 
 DEPENDENCIES:
@@ -1979,7 +1914,12 @@ DEPENDENCIES:
   - ReactCommon/turbomodule/core (from `../node_modules/react-native/ReactCommon`)
   - ReactNativeDependencies (from `../node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec`)
   - RNScreens (from `../node_modules/react-native-screens`)
+  - trtc-react-native (from `../node_modules/trtc-react-native`)
   - Yoga (from `../node_modules/react-native/ReactCommon/yoga`)
+
+SPEC REPOS:
+  trunk:
+    - TXLiteAVSDK_Professional
 
 EXTERNAL SOURCES:
   FBLazyVector:
@@ -2131,6 +2071,8 @@ EXTERNAL SOURCES:
     :podspec: "../node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec"
   RNScreens:
     :path: "../node_modules/react-native-screens"
+  trtc-react-native:
+    :path: "../node_modules/trtc-react-native"
   Yoga:
     :path: "../node_modules/react-native/ReactCommon/yoga"
 
@@ -2173,7 +2115,7 @@ SPEC CHECKSUMS:
   React-logger: b5521614afb8690420146dfc61a1447bb5d65419
   React-Mapbuffer: f4ee8c62e0ef8359d139124f35a471518a172cd3
   React-microtasksnativemodule: d1956f0eec54c619b63a379520fb4c618a55ccb9
-  react-native-safe-area-context: ae7587b95fb580d1800c5b0b2a7bd48c2868e67a
+  react-native-safe-area-context: e89848fc12d32ccca63d0d7d16dd96918d07c730
   React-NativeModulesApple: 5ba0903927f6b8d335a091700e9fda143980f819
   React-networking: 3a4b7f9ed2b2d1c0441beacb79674323a24bcca6
   React-oscompat: ff26abf0ae3e3fdbe47b44224571e3fc7226a573
@@ -2182,14 +2124,14 @@ SPEC CHECKSUMS:
   React-performancetimeline: b44f82caa563e46068d02d9cf5b0d2b84bdc7a6a
   React-RCTActionSheet: fc1d5d419856868e7f8c13c14591ed63dadef43a
   React-RCTAnimation: 2a1e7eeb55b71e8524db296fa31e46eeaa2d0da4
-  React-RCTAppDelegate: 317c1102a2d0bcc07567d8de58d9147102080b0e
+  React-RCTAppDelegate: 5e4a6e0beebe5925e8d95e57b377cefaf8a8ae84
   React-RCTBlob: c82bbf96b2d1389550c05fb9739d4e85d471052e
-  React-RCTFabric: d82ad8120ba70fe63207e261b9e33d9b6077e2de
-  React-RCTFBReactNativeSpec: 4d33b5f3b339e9fa902168e8a1d62c458dda16e9
+  React-RCTFabric: ef3ebe9ff46aea01642fb6d2ad40e5ebb6c02ead
+  React-RCTFBReactNativeSpec: 332d710de421d2ba945103c694a0b3eeec249007
   React-RCTImage: f959463e53ea731ab267e371eea1b92fccf27634
   React-RCTLinking: 2a857113b8059ac4f0a8ae89f8aa312837b955d0
   React-RCTNetwork: dc026bf25f6457249349be8cf8bd5fdf84cdfb14
-  React-RCTRuntime: b0630731fd864064066301e1e31406fea606d5f9
+  React-RCTRuntime: 3402ea576353d715ca965e2c7d218e300243a9fd
   React-RCTSettings: e159e19475df2e92fd3b4ddcfe29f6cc12cf0ee4
   React-RCTText: 7356cc84c2ed79635931891c176f72e0289dc75d
   React-RCTVibration: 77621175b67b22e655ce4b29d1cda8498f2033e7
@@ -2208,9 +2150,11 @@ SPEC CHECKSUMS:
   ReactCodegen: 4579f1ab5d6d9c331e4288f13649b8d022902994
   ReactCommon: 07572bf9e687c8a52fbe4a3641e9e3a1a477c78e
   ReactNativeDependencies: 7c15e10281e919f65d2f479e97885d05d1763542
-  RNScreens: 6cb648bdad8fe9bee9259fe144df95b6d1d5b707
+  RNScreens: 8696d7c6956f3d230294a5278d15bb11f447e4de
+  trtc-react-native: b55da16b840bcfb56b05e19bd170ee191921124b
+  TXLiteAVSDK_Professional: fab8ac9da64efa80bef81377b35530a791411a74
   Yoga: c0b3f2c7e8d3e327e450223a2414ca3fa296b9a2
 
-PODFILE CHECKSUM: fd3c4b9cc6b661909694035937534b7633239373
+PODFILE CHECKSUM: 64fe2dd557d09dc22075bc43317bad4876630518
 
 COCOAPODS: 1.16.2

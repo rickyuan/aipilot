@@ -13,10 +13,13 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'node:http';
-import type { WsMessage, CommandResult } from '@deskpilot/shared';
+import type { WsMessage, CommandResult, CommandPayload } from '@deskpilot/shared';
 
 /** Connected PC Agents keyed by roomId */
 const agentConnections = new Map<string, WebSocket>();
+
+/** Map pcUserId → roomId for lookup by user */
+const userToRoom = new Map<string, string>();
 
 /** Pending LLM callback responses keyed by roomId */
 const pendingCallbacks = new Map<string, {
@@ -43,6 +46,7 @@ export function initWebSocketRelay(server: Server): void {
 
     console.log(`[WS] Agent connected: ${userId} in room ${roomId}`);
     agentConnections.set(roomId, ws);
+    userToRoom.set(userId, roomId);
 
     ws.on('message', (raw) => {
       try {
@@ -56,6 +60,7 @@ export function initWebSocketRelay(server: Server): void {
     ws.on('close', () => {
       console.log(`[WS] Agent disconnected: ${userId} from room ${roomId}`);
       agentConnections.delete(roomId);
+      userToRoom.delete(userId);
     });
 
     ws.on('error', (err) => {
@@ -111,23 +116,72 @@ export function relayUtteranceToAgent(
   text: string,
   timeoutMs = 30000,
 ): Promise<string> {
-  const ws = agentConnections.get(roomId);
+  let ws = agentConnections.get(roomId);
+  let actualRoomId = roomId;
+
+  // If not found by exact roomId, try to find agent by pcUserId from paired room
+  // Paired rooms have format: dp_{pcUserId}_paired
+  if ((!ws || ws.readyState !== WebSocket.OPEN) && roomId.endsWith('_paired')) {
+    const pcUserId = roomId.replace(/^dp_/, '').replace(/_paired$/, '');
+    const agentRoomId = userToRoom.get(pcUserId);
+    if (agentRoomId) {
+      ws = agentConnections.get(agentRoomId);
+      actualRoomId = agentRoomId;
+    }
+  }
+
+  // Fallback: if only one agent is connected, use it
+  if ((!ws || ws.readyState !== WebSocket.OPEN) && agentConnections.size === 1) {
+    const entry = [...agentConnections.entries()][0] as [string, WebSocket];
+    ws = entry[1];
+    actualRoomId = entry[0];
+  }
+
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     return Promise.resolve('PC Agent is not connected. Please make sure the DeskPilot agent is running on your computer.');
   }
 
   // Send utterance to agent
-  const msg: WsMessage = { type: 'utterance', text, roomId };
+  const msg: WsMessage = { type: 'utterance', text, roomId: actualRoomId };
   ws.send(JSON.stringify(msg));
 
   return new Promise<string>((resolve) => {
     const timeout = setTimeout(() => {
-      pendingCallbacks.delete(roomId);
+      pendingCallbacks.delete(actualRoomId);
       resolve('The command is taking a while to execute. Please wait.');
     }, timeoutMs);
 
-    pendingCallbacks.set(roomId, { resolve, timeout });
+    pendingCallbacks.set(actualRoomId, { resolve, timeout });
   });
+}
+
+/**
+ * Sends a pre-classified command to the PC Agent for direct execution.
+ * @param roomId - The room ID
+ * @param command - The classified command payload
+ */
+export function sendClassifiedCommand(roomId: string, command: CommandPayload): void {
+  let ws = agentConnections.get(roomId);
+
+  // Fallback: try paired room format
+  if ((!ws || ws.readyState !== WebSocket.OPEN) && roomId.endsWith('_paired')) {
+    const pcUserId = roomId.replace(/^dp_/, '').replace(/_paired$/, '');
+    const agentRoomId = userToRoom.get(pcUserId);
+    if (agentRoomId) {
+      ws = agentConnections.get(agentRoomId);
+    }
+  }
+
+  // Fallback: if only one agent is connected, use it
+  if ((!ws || ws.readyState !== WebSocket.OPEN) && agentConnections.size === 1) {
+    const entry = [...agentConnections.entries()][0] as [string, WebSocket];
+    ws = entry[1];
+  }
+
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const msg: WsMessage = { type: 'classified_command', command, roomId };
+    ws.send(JSON.stringify(msg));
+  }
 }
 
 /**

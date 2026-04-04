@@ -2,7 +2,7 @@
  * TRTC server-side API wrapper.
  *
  * Handles REST API calls to TRTC for Conversational AI bot lifecycle.
- * Endpoint: trtc.tencentcloudapi.com (region: ap-singapore)
+ * Endpoint: trtc.intl.tencentcloudapi.com (international, region: ap-singapore)
  *
  * Uses TC3-HMAC-SHA256 signing with Tencent Cloud API credentials
  * (TENCENT_SECRET_ID + TENCENT_SECRET_KEY), which are separate from
@@ -13,7 +13,7 @@ import { createHmac, createHash } from 'node:crypto';
 import type { AIBotConfig } from '@deskpilot/shared';
 import { config } from '../config.js';
 
-const TRTC_API_HOST = 'trtc.tencentcloudapi.com';
+const TRTC_API_HOST = 'trtc.intl.tencentcloudapi.com';
 const TRTC_REGION = 'ap-singapore';
 
 /**
@@ -115,6 +115,7 @@ export async function createAIConversation(
   botConfig: AIBotConfig,
   llmCallbackUrl?: string,
 ): Promise<string> {
+  // TRTC StartAIConversation: AgentConfig/STTConfig are objects, TTSConfig/LLMConfig are JSON strings
   const params: Record<string, unknown> = {
     SdkAppId: config.TRTC_SDK_APP_ID,
     RoomId: botConfig.roomId,
@@ -122,22 +123,33 @@ export async function createAIConversation(
     AgentConfig: {
       UserId: botConfig.botUserId,
       UserSig: botConfig.botUserSig,
-      TargetUserId: '', // Subscribe to all users
+      TargetUserId: botConfig.targetUserId,
+      MaxIdleTime: botConfig.maxIdleTime,
+      WelcomeMessage: 'Hi, I am DeskPilot. How can I help you?',
     },
     STTConfig: {
       Language: botConfig.asrLanguage || 'zh',
     },
-    TTSConfig: {
-      Voice: botConfig.ttsVoice || 'default',
-    },
+    TTSConfig: JSON.stringify({
+      TTSType: 'elevenlabs',
+      Model: 'eleven_turbo_v2_5',
+      APIKey: config.ELEVENLABS_API_KEY ?? '',
+      VoiceId: config.ELEVENLABS_VOICE_ID ?? '',
+    }),
   };
 
-  // If we have a callback URL, configure the bot to use our Cloud as the LLM backend
+  // Configure the bot's LLM to call our OpenAI-compatible endpoint
   if (llmCallbackUrl) {
-    params['LLMConfig'] = {
-      LLMType: 'customLLM',
-      CustomLLMURL: llmCallbackUrl,
-    };
+    params['LLMConfig'] = JSON.stringify({
+      LLMType: 'openai',
+      Model: 'deskpilot',
+      APIKey: 'deskpilot', // Our endpoint doesn't validate API keys
+      APIUrl: llmCallbackUrl,
+      Streaming: true,
+      SystemPrompt: 'You are DeskPilot, a voice-controlled AI assistant. Relay user commands to the PC agent.',
+      Timeout: 30,
+      History: 5,
+    });
   }
 
   const result = await trtcApiRequest('StartAIConversation', params) as {

@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>DeskPilot Mobile</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f0f23;
+      color: #e0e0e0;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+
+    /* --- Pairing Screen --- */
+    #pairingScreen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 32px 24px;
+    }
+    .logo { font-size: 28px; font-weight: 700; margin-bottom: 4px; }
+    .tagline { color: #888; font-size: 13px; margin-bottom: 48px; }
+    .code-input-wrap { margin-bottom: 24px; }
+    .code-input {
+      width: 240px;
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: 12px;
+      text-align: center;
+      background: #1a1a2e;
+      border: 2px solid #333;
+      border-radius: 12px;
+      color: #fff;
+      padding: 14px 16px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .code-input:focus { border-color: #4a6cf7; }
+    .code-input::placeholder { color: #444; letter-spacing: 8px; font-size: 24px; }
+    .btn {
+      display: block;
+      width: 240px;
+      background: #4a6cf7;
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      padding: 14px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn:disabled { background: #333; }
+    .pair-error { color: #f87171; font-size: 13px; margin-top: 12px; min-height: 20px; }
+
+    /* --- Remote Screen --- */
+    #remoteScreen {
+      display: none;
+      flex-direction: column;
+      height: 100vh;
+      background: #000;
+    }
+    #screenView {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #111;
+      position: relative;
+      overflow: hidden;
+    }
+    #screenView video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    #screenPlaceholder {
+      color: #555;
+      font-size: 14px;
+      text-align: center;
+    }
+
+    /* Bottom bar */
+    .bottom-bar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px 24px 32px;
+      background: #0f0f23;
+      gap: 16px;
+    }
+    .mic-btn {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      border: 3px solid #333;
+      background: #1a1a2e;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 28px;
+      transition: all 0.2s;
+    }
+    .mic-btn.active {
+      border-color: #4ade80;
+      background: #1a3a2e;
+      animation: mic-pulse 1.5s infinite;
+    }
+    @keyframes mic-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(74,222,128,0.4); }
+      50% { box-shadow: 0 0 0 12px rgba(74,222,128,0); }
+    }
+    .mic-btn.disabled { opacity: 0.4; pointer-events: none; }
+    .status-text {
+      font-size: 13px;
+      color: #888;
+      min-width: 100px;
+    }
+    .status-text.active { color: #4ade80; }
+    .disconnect-btn {
+      background: none;
+      border: 1px solid #555;
+      border-radius: 8px;
+      color: #888;
+      padding: 8px 14px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    /* Feedback toast */
+    #feedback {
+      position: absolute;
+      bottom: 12px;
+      left: 12px;
+      right: 12px;
+      background: rgba(26,26,46,0.95);
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 13px;
+      color: #ccc;
+      display: none;
+      max-height: 80px;
+      overflow-y: auto;
+    }
+
+    /* Log overlay (debug) */
+    #logOverlay {
+      position: fixed;
+      bottom: 100px;
+      left: 8px;
+      right: 8px;
+      background: rgba(0,0,0,0.85);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-family: monospace;
+      font-size: 11px;
+      max-height: 120px;
+      overflow-y: auto;
+      display: none;
+      z-index: 100;
+    }
+    .log-line { color: #888; line-height: 1.5; }
+    .log-line.ok { color: #4ade80; }
+    .log-line.err { color: #f87171; }
+    #toggleLog {
+      position: fixed;
+      top: 8px;
+      right: 8px;
+      background: rgba(255,255,255,0.1);
+      border: none;
+      color: #888;
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      z-index: 101;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Pairing Screen -->
+<div id="pairingScreen">
+  <div class="logo">DeskPilot</div>
+  <div class="tagline">Voice-controlled remote desktop</div>
+  <div class="code-input-wrap">
+    <input id="codeInput" class="code-input" type="tel" maxlength="6"
+           placeholder="000000" inputmode="numeric" autocomplete="off">
+  </div>
+  <button class="btn" id="connectBtn" disabled onclick="doPair()">Connect</button>
+  <div class="pair-error" id="pairError"></div>
+</div>
+
+<!-- Remote Screen -->
+<div id="remoteScreen">
+  <div id="screenView">
+    <div id="screenPlaceholder">Waiting for PC screen...</div>
+  </div>
+  <div id="feedback"></div>
+  <div class="bottom-bar">
+    <span class="status-text" id="micStatus">Tap to speak</span>
+    <div class="mic-btn" id="micBtn" onclick="toggleMic()">🎤</div>
+    <button class="disconnect-btn" onclick="doDisconnect()">Disconnect</button>
+  </div>
+</div>
+
+<!-- Debug log -->
+<button id="toggleLog" onclick="document.getElementById('logOverlay').style.display=document.getElementById('logOverlay').style.display==='none'?'block':'none'">Log</button>
+<div id="logOverlay"></div>
+
+<script src="https://unpkg.com/trtc-sdk-v5@5.16.0/trtc.js"></script>
+<script>
+  // ---- State ----
+  let trtc = null;
+  let roomId = '';
+  let mobileConfig = null;
+  let pcUserId = '';
+  let micOn = false;
+
+  // Use current origin as API base (served from Cloud via ngrok)
+  const API_BASE = location.origin;
+
+  // ---- Logging ----
+  function log(msg, type) {
+    const el = document.getElementById('logOverlay');
+    const d = document.createElement('div');
+    d.className = 'log-line ' + (type === 'ok' ? 'ok' : type === 'err' ? 'err' : '');
+    d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    el.appendChild(d);
+    el.scrollTop = el.scrollHeight;
+    console.log('[Mobile]', msg);
+  }
+
+  // ---- Pairing ----
+  const codeInput = document.getElementById('codeInput');
+  const connectBtn = document.getElementById('connectBtn');
+
+  codeInput.addEventListener('input', () => {
+    codeInput.value = codeInput.value.replace(/\D/g, '').slice(0, 6);
+    connectBtn.disabled = codeInput.value.length !== 6;
+  });
+
+  async function doPair() {
+    const code = codeInput.value;
+    if (code.length !== 6) return;
+
+    connectBtn.disabled = true;
+    connectBtn.textContent = 'Connecting...';
+    document.getElementById('pairError').textContent = '';
+
+    const mobileUserId = 'mobile_' + Date.now().toString(36);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/pairing/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pairingCode: code, mobileUserId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Pairing failed');
+
+      log(`Paired! Room: ${data.roomId}`, 'ok');
+      roomId = data.roomId;
+      pcUserId = data.pcUserId;
+      mobileConfig = data.mobileRoomConfig;
+
+      // Switch to remote screen
+      document.getElementById('pairingScreen').style.display = 'none';
+      document.getElementById('remoteScreen').style.display = 'flex';
+
+      await joinRoom();
+    } catch (err) {
+      document.getElementById('pairError').textContent = err.message;
+      connectBtn.disabled = false;
+      connectBtn.textContent = 'Connect';
+      log('Pair failed: ' + err.message, 'err');
+    }
+  }
+
+  // ---- TRTC Room ----
+  async function joinRoom() {
+    try {
+      trtc = TRTC.create();
+      log('TRTC created');
+
+      // Remote user publishes screen share → show it
+      trtc.on(TRTC.EVENT.REMOTE_VIDEO_AVAILABLE, async ({ userId, streamType }) => {
+        log(`Video available: ${userId} type=${streamType}`, 'ok');
+        // streamType: 'main' or 'sub' (screen share is typically 'sub' or published as main via startScreenShare)
+        const container = document.getElementById('screenView');
+        // Clear placeholder
+        const ph = document.getElementById('screenPlaceholder');
+        if (ph) ph.style.display = 'none';
+
+        await trtc.startRemoteVideo({
+          userId,
+          streamType,
+          view: container,
+          option: { objectFit: 'contain' },
+        });
+        log(`Playing video from ${userId}`, 'ok');
+      });
+
+      trtc.on(TRTC.EVENT.REMOTE_VIDEO_UNAVAILABLE, ({ userId, streamType }) => {
+        log(`Video unavailable: ${userId} type=${streamType}`);
+        trtc.stopRemoteVideo({ userId, streamType });
+        const ph = document.getElementById('screenPlaceholder');
+        if (ph) ph.style.display = 'block';
+      });
+
+      trtc.on(TRTC.EVENT.REMOTE_AUDIO_AVAILABLE, async ({ userId }) => {
+        log(`Audio available: ${userId} (auto-play)`, 'ok');
+      });
+
+      trtc.on(TRTC.EVENT.REMOTE_USER_ENTER, ({ userId }) => {
+        log(`User joined: ${userId}`, 'ok');
+      });
+
+      trtc.on(TRTC.EVENT.REMOTE_USER_EXIT, ({ userId }) => {
+        log(`User left: ${userId}`);
+      });
+
+      trtc.on(TRTC.EVENT.ERROR, (err) => {
+        log(`TRTC error: ${err.message || err}`, 'err');
+      });
+
+      // Join room
+      log('Joining room...');
+      await trtc.enterRoom({
+        sdkAppId: mobileConfig.sdkAppId,
+        userId: mobileConfig.userId,
+        userSig: mobileConfig.userSig,
+        strRoomId: mobileConfig.roomId,
+        scene: 'live',
+        role: 'anchor',
+      });
+      log('Joined room!', 'ok');
+
+      // Auto-start mic for voice conversation with AI bot
+      await startMic();
+
+    } catch (err) {
+      log('Join failed: ' + err.message, 'err');
+    }
+  }
+
+  // ---- Mic control ----
+  async function startMic() {
+    try {
+      await trtc.startLocalAudio({ option: { profile: 'speech' } });
+      micOn = true;
+      document.getElementById('micBtn').classList.add('active');
+      document.getElementById('micStatus').textContent = 'Listening...';
+      document.getElementById('micStatus').classList.add('active');
+      log('Mic started', 'ok');
+    } catch (err) {
+      log('Mic error: ' + err.message, 'err');
+    }
+  }
+
+  async function stopMic() {
+    try {
+      await trtc.stopLocalAudio();
+      micOn = false;
+      document.getElementById('micBtn').classList.remove('active');
+      document.getElementById('micStatus').textContent = 'Tap to speak';
+      document.getElementById('micStatus').classList.remove('active');
+      log('Mic stopped');
+    } catch (err) {
+      log('Mic stop error: ' + err.message, 'err');
+    }
+  }
+
+  function toggleMic() {
+    if (micOn) stopMic();
+    else startMic();
+  }
+
+  // ---- Disconnect ----
+  async function doDisconnect() {
+    try {
+      if (trtc) {
+        if (micOn) await stopMic();
+        await trtc.exitRoom();
+        trtc.destroy();
+        trtc = null;
+      }
+    } catch (e) { /* ignore */ }
+
+    document.getElementById('remoteScreen').style.display = 'none';
+    document.getElementById('pairingScreen').style.display = 'flex';
+    connectBtn.textContent = 'Connect';
+    connectBtn.disabled = true;
+    codeInput.value = '';
+    document.getElementById('pairError').textContent = '';
+    const ph = document.getElementById('screenPlaceholder');
+    if (ph) ph.style.display = 'block';
+    log('Disconnected');
+  }
+</script>
+</body>
+</html>

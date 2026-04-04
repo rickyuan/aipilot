@@ -25,6 +25,15 @@ const envSchema = z.object({
   SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_KEY: z.string().min(1),
 
+  // ElevenLabs TTS
+  ELEVENLABS_API_KEY: z.string().min(1).optional(),
+  ELEVENLABS_VOICE_ID: z.string().min(1).optional(),
+
+  // Groq LLM (for intent classification)
+  GROQ_API_KEY: z.string().min(1).optional(),
+  GROQ_API_URL: z.string().optional(),
+  GROQ_MODEL: z.string().optional(),
+
   // Optional
   PORT: z.coerce.number().default(3000),
   DESKPILOT_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),

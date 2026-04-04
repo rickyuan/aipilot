@@ -44,6 +44,7 @@ export interface CommandResult {
  */
 export type WsMessage =
   | { type: 'utterance'; text: string; roomId: string }
+  | { type: 'classified_command'; command: CommandPayload; roomId: string }
   | { type: 'command_result'; result: CommandResult; roomId: string }
   | { type: 'bot_feedback'; text: string; roomId: string }
   | { type: 'ping' }

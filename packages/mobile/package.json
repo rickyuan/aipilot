@@ -4,6 +4,7 @@
   "private": true,
   "main": "src/App.tsx",
   "scripts": {
+    "postinstall": "sh scripts/patch-rn-new-arch.sh",
     "dev": "npx react-native start",
     "android": "npx react-native run-android",
     "ios": "npx react-native run-ios",
@@ -21,7 +22,8 @@
     "react": "19.2.3",
     "react-native": "0.84.1",
     "react-native-safe-area-context": "^5.5.2",
-    "react-native-screens": "^4.24.0"
+    "react-native-screens": "^4.24.0",
+    "trtc-react-native": "^3.2.4"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

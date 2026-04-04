@@ -30,9 +30,18 @@ roomRouter.get('/:id/config', (req, res) => {
   res.json({ roomConfig });
 });
 
+const createBotSchema = z.object({
+  targetUserId: z.string().min(1),
+});
+
 /** POST /api/rooms/:id/bot — Create an AI bot in the room */
 roomRouter.post('/:id/bot', async (req, res) => {
   const roomId = req.params['id'] ?? '';
+  const parsed = createBotSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'targetUserId is required' });
+    return;
+  }
 
   if (hasBotInRoom(roomId)) {
     res.status(409).json({ error: 'Bot already exists in this room' });
@@ -40,7 +49,7 @@ roomRouter.post('/:id/bot', async (req, res) => {
   }
 
   try {
-    const { botConfig, taskId } = await createBot(roomId);
+    const { botConfig, taskId } = await createBot(roomId, parsed.data.targetUserId);
     res.status(201).json({ botConfig, taskId });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';

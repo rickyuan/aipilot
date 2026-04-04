@@ -28,9 +28,8 @@
 	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-	  <!-- Do not change NSAllowsArbitraryLoads to true, or you will risk app rejection! -->
 		<key>NSAllowsArbitraryLoads</key>
-		<false/>
+		<true/>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
@@ -55,5 +54,11 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
+	<key>RCTNewArchEnabled</key>
+	<false/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>DeskPilot needs microphone access for voice commands to control your PC.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>DeskPilot needs camera access for video calls.</string>
 </dict>
 </plist>

@@ -77,18 +77,15 @@ export async function verifyPairingCode(code: string): Promise<DevicePairing | n
 
   const row = data as PairingRow;
 
-  // Mark as consumed
-  await getSupabase()
-    .from('pairings')
-    .update({ consumed: true })
-    .eq('id', row.id);
+  // Don't consume on verify — allow re-pairing within the expiry window.
+  // Code expires naturally after 5 minutes.
 
   return {
     pairingCode: row.pairing_code,
     pcUserId: row.pc_user_id,
     createdAt: new Date(row.created_at).getTime(),
     expiresAt: new Date(row.expires_at).getTime(),
-    consumed: true,
+    consumed: false,
   };
 }
 

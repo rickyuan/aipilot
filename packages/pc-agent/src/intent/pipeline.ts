@@ -38,7 +38,7 @@ export async function processUtterance(
     const result: CommandResult = {
       commandId: 'low_confidence',
       success: false,
-      output: `I'm not sure what you mean by "${utterance}". Could you rephrase that?`,
+      output: `I didn't understand "${utterance}". Try a specific command like: "echo hello", "list files", "what is running on port 3000", or "create a file called test.txt"`,
       error: 'Low confidence classification',
       durationMs: 0,
       timestamp: Date.now(),

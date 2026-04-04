@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>DeskPilot — Screen Share</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f0f23;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .container { text-align: center; padding: 32px; max-width: 600px; }
+    h1 { font-size: 28px; margin-bottom: 8px; }
+    .subtitle { color: #888; font-size: 14px; margin-bottom: 32px; }
+    .status-card {
+      background: #1a1a2e;
+      border-radius: 16px;
+      padding: 24px 32px;
+      margin-bottom: 24px;
+    }
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+    }
+    .status-label { color: #888; font-size: 14px; }
+    .status-value { font-size: 14px; font-weight: 500; }
+    .status-dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+    }
+    .dot-green { background: #4ade80; }
+    .dot-yellow { background: #facc15; }
+    .dot-red { background: #f87171; }
+    .dot-pulse { animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+    .btn {
+      display: inline-block;
+      background: #4a6cf7;
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      padding: 14px 36px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: #3b5ce4; }
+    .btn:disabled { background: #333; cursor: not-allowed; }
+    .btn-danger { background: #dc2626; }
+    .btn-danger:hover { background: #b91c1c; }
+    .error { color: #f87171; font-size: 13px; margin-top: 12px; }
+    .log {
+      text-align: left;
+      background: #111;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 16px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+      line-height: 1.6;
+    }
+    .log-entry { color: #888; }
+    .log-entry.success { color: #4ade80; }
+    .log-entry.error { color: #f87171; }
+    .preview {
+      margin-top: 16px;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #000;
+    }
+    .preview video {
+      width: 100%;
+      max-height: 300px;
+      object-fit: contain;
+    }
+    #pairingCode {
+      font-size: 36px;
+      font-weight: bold;
+      letter-spacing: 8px;
+      color: #4a6cf7;
+      margin: 12px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>DeskPilot Agent</h1>
+    <p class="subtitle">Screen sharing & command execution</p>
+
+    <div class="status-card">
+      <div class="status-row">
+        <span class="status-label">Agent</span>
+        <span class="status-value"><span class="status-dot dot-green dot-pulse"></span>Running</span>
+      </div>
+      <div class="status-row">
+        <span class="status-label">Room</span>
+        <span class="status-value" id="roomStatus">Connecting...</span>
+      </div>
+      <div class="status-row">
+        <span class="status-label">Screen Share</span>
+        <span class="status-value" id="screenStatus">
+          <span class="status-dot dot-yellow"></span>Not started
+        </span>
+      </div>
+      <div class="status-row">
+        <span class="status-label">Pairing Code</span>
+        <span class="status-value" id="pairingDisplay">—</span>
+      </div>
+    </div>
+
+    <div id="actions" style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+      <button class="btn" id="startBtn" onclick="startScreenShare()" disabled>Start Screen Share</button>
+      <button class="btn" style="background:#6366f1" onclick="regeneratePairing()">Regenerate Code</button>
+    </div>
+
+    <div id="errorMsg" class="error" style="display:none"></div>
+
+    <div class="preview" id="preview" style="display:none">
+      <video id="localVideo" autoplay muted playsinline></video>
+    </div>
+
+    <div class="log" id="log"></div>
+  </div>
+
+  <script src="https://unpkg.com/trtc-sdk-v5@5.16.0/trtc.js"></script>
+  <script>
+    // State
+    let trtc = null;
+    let roomConfig = null;
+    let isSharing = false;
+
+    // Config passed from PC Agent via query params or local API
+    const params = new URLSearchParams(window.location.search);
+    const AGENT_PORT = params.get('agentPort') || '8089';
+    const CLOUD_URL = params.get('cloudUrl') || 'http://localhost:3000';
+
+    // Logging
+    function log(msg, type = '') {
+      const el = document.getElementById('log');
+      const entry = document.createElement('div');
+      entry.className = 'log-entry ' + type;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      el.appendChild(entry);
+      el.scrollTop = el.scrollHeight;
+      console.log(`[ScreenShare] ${msg}`);
+    }
+
+    function showError(msg) {
+      const el = document.getElementById('errorMsg');
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+
+    // Fetch room config from the local PC Agent server
+    async function fetchConfig() {
+      try {
+        log('Fetching room config from agent...');
+        const res = await fetch(`http://localhost:${AGENT_PORT}/api/screen-config`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        roomConfig = data.roomConfig;
+
+        document.getElementById('roomStatus').innerHTML =
+          `<span class="status-dot dot-green"></span>${roomConfig.roomId}`;
+
+        if (data.pairingCode) {
+          document.getElementById('pairingDisplay').innerHTML =
+            `<span style="color:#4a6cf7;font-weight:bold;letter-spacing:4px">${data.pairingCode}</span>`;
+        }
+
+        document.getElementById('startBtn').disabled = false;
+        log(`Room: ${roomConfig.roomId}, User: ${roomConfig.userId}`, 'success');
+        return true;
+      } catch (err) {
+        log(`Failed to fetch config: ${err.message}`, 'error');
+        document.getElementById('roomStatus').innerHTML =
+          `<span class="status-dot dot-red"></span>Disconnected`;
+        showError('Cannot connect to PC Agent. Make sure it is running.');
+        return false;
+      }
+    }
+
+    // Start screen share
+    async function startScreenShare() {
+      if (!roomConfig) {
+        showError('No room config available');
+        return;
+      }
+
+      const btn = document.getElementById('startBtn');
+      btn.disabled = true;
+      btn.textContent = 'Starting...';
+
+      try {
+        // Initialize TRTC
+        trtc = TRTC.create();
+        log('TRTC instance created');
+
+        // Listen for events
+        trtc.on(TRTC.EVENT.ERROR, (err) => {
+          log(`TRTC error: ${err.message || err}`, 'error');
+        });
+
+        trtc.on(TRTC.EVENT.REMOTE_USER_ENTER, (evt) => {
+          log(`User joined: ${evt.userId}`, 'success');
+        });
+
+        trtc.on(TRTC.EVENT.REMOTE_USER_EXIT, (evt) => {
+          log(`User left: ${evt.userId}`);
+        });
+
+        // Enter room
+        log('Joining TRTC room...');
+        await trtc.enterRoom({
+          sdkAppId: roomConfig.sdkAppId,
+          userId: roomConfig.userId,
+          userSig: roomConfig.userSig,
+          strRoomId: roomConfig.roomId,
+          scene: 'live',
+          role: 'anchor',
+        });
+        log('Joined room successfully', 'success');
+
+        // Start screen capture
+        log('Requesting screen capture permission...');
+        await trtc.startScreenShare({
+          encoderConfig: '1080p',
+          publish: true,
+        });
+
+        isSharing = true;
+        log('Screen sharing started!', 'success');
+
+        // Update UI
+        document.getElementById('screenStatus').innerHTML =
+          `<span class="status-dot dot-green dot-pulse"></span>Sharing`;
+
+        btn.textContent = 'Stop Screen Share';
+        btn.className = 'btn btn-danger';
+        btn.disabled = false;
+        btn.onclick = stopScreenShare;
+
+        // Show local preview
+        const videoEl = document.getElementById('localVideo');
+        const previewDiv = document.getElementById('preview');
+        // Get the screen share track for preview
+        try {
+          const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+          videoEl.srcObject = stream;
+          previewDiv.style.display = 'block';
+          // Stop this extra capture when the original one ends
+          stream.getVideoTracks()[0].onended = () => {
+            previewDiv.style.display = 'none';
+          };
+        } catch {
+          // Preview is optional, don't fail if it doesn't work
+          log('Local preview not available (not critical)');
+        }
+
+        // Handle browser-level stop (user clicks "Stop sharing" in browser UI)
+        trtc.on(TRTC.EVENT.SCREEN_SHARE_STOPPED, () => {
+          log('Screen share stopped by browser');
+          resetUI();
+        });
+
+      } catch (err) {
+        log(`Failed to start screen share: ${err.message}`, 'error');
+        showError(err.message);
+        btn.textContent = 'Start Screen Share';
+        btn.className = 'btn';
+        btn.disabled = false;
+        btn.onclick = startScreenShare;
+      }
+    }
+
+    // Stop screen share
+    async function stopScreenShare() {
+      try {
+        if (trtc) {
+          await trtc.stopScreenShare();
+          await trtc.exitRoom();
+          trtc.destroy();
+          trtc = null;
+        }
+        log('Screen sharing stopped');
+        resetUI();
+      } catch (err) {
+        log(`Error stopping: ${err.message}`, 'error');
+      }
+    }
+
+    function resetUI() {
+      isSharing = false;
+      document.getElementById('screenStatus').innerHTML =
+        `<span class="status-dot dot-yellow"></span>Stopped`;
+
+      const btn = document.getElementById('startBtn');
+      btn.textContent = 'Start Screen Share';
+      btn.className = 'btn';
+      btn.disabled = false;
+      btn.onclick = startScreenShare;
+
+      document.getElementById('preview').style.display = 'none';
+      const video = document.getElementById('localVideo');
+      if (video.srcObject) {
+        video.srcObject.getTracks().forEach(t => t.stop());
+        video.srcObject = null;
+      }
+    }
+
+    // Regenerate pairing code
+    async function regeneratePairing() {
+      try {
+        log('Regenerating pairing code...');
+        const res = await fetch(`http://localhost:${AGENT_PORT}/api/regenerate-pairing`, {
+          method: 'POST'
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        document.getElementById('pairingDisplay').innerHTML =
+          `<span style="color:#4a6cf7;font-weight:bold;letter-spacing:4px">${data.pairingCode}</span>`;
+        log(`New pairing code: ${data.pairingCode} (expires: ${new Date(data.expiresAt).toLocaleTimeString()})`, 'success');
+      } catch (err) {
+        log(`Failed to regenerate: ${err.message}`, 'error');
+      }
+    }
+
+    // Auto-fetch config on load
+    fetchConfig();
+
+    // Retry config fetch every 5s if not connected
+    setInterval(() => {
+      if (!roomConfig) fetchConfig();
+    }, 5000);
+  </script>
+</body>
+</html>

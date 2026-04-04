@@ -12,6 +12,7 @@ import WebSocket from 'ws';
 import type { WsMessage, CommandResult } from '@deskpilot/shared';
 import { config } from './config.js';
 import { processUtterance } from './intent/pipeline.js';
+import { routeCommand } from './executors/router.js';
 
 let ws: WebSocket | null = null;
 let reconnectAttempts = 0;
@@ -75,6 +76,25 @@ async function handleMessage(msg: WsMessage): Promise<void> {
     return;
   }
 
+  // Pre-classified command from Cloud LLM — skip classification, execute directly
+  if (msg.type === 'classified_command') {
+    console.log(`[WS] Received classified command: ${msg.command.intentType} → ${msg.command.executor}`);
+    console.log(`[WS] Instruction: "${msg.command.instruction.slice(0, 100)}"`);
+
+    try {
+      const result = await routeCommand(msg.command);
+      sendResult(result);
+
+      const status = result.success ? 'OK' : `FAILED: ${result.error ?? 'unknown'}`;
+      console.log(`[WS] Command ${msg.command.commandId} ${status}`);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : 'Unknown error';
+      console.error(`[WS] Command execution error: ${errMsg}`);
+    }
+    return;
+  }
+
+  // Legacy: raw utterance — classify locally (fallback if Cloud LLM is unavailable)
   if (msg.type === 'utterance') {
     console.log(`[WS] Received utterance: "${msg.text}"`);
 

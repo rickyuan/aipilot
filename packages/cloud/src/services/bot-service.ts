@@ -20,9 +20,10 @@ const activeBots = new Map<string, string>();
 /**
  * Creates an AI bot and joins it to a TRTC room.
  * @param roomId - The TRTC room ID
+ * @param targetUserId - The userId the bot should converse with
  * @returns The bot config and task ID
  */
-export async function createBot(roomId: string): Promise<{ botConfig: AIBotConfig; taskId: string }> {
+export async function createBot(roomId: string, targetUserId: string): Promise<{ botConfig: AIBotConfig; taskId: string }> {
   const botUserId = generateBotUserId(roomId);
   const botUserSig = generateUserSig(
     config.TRTC_SDK_APP_ID,
@@ -34,13 +35,14 @@ export async function createBot(roomId: string): Promise<{ botConfig: AIBotConfi
     roomId,
     botUserId,
     botUserSig,
+    targetUserId,
+    maxIdleTime: 600, // 10 minutes idle timeout
     asrLanguage: 'zh',
-    ttsVoice: 'default',
   };
 
-  // Build LLM callback URL for the bot to send ASR text to
+  // LLM callback URL — TRTC sends X-Room-Id header automatically, no need for roomId in path
   const publicUrl = config.DESKPILOT_PUBLIC_URL ?? `http://localhost:${String(config.PORT)}`;
-  const llmCallbackUrl = `${publicUrl}/api/bot/llm-callback`;
+  const llmCallbackUrl = `${publicUrl}/api/bot/v1/chat/completions`;
 
   const taskId = await createAIConversation(botConfig, llmCallbackUrl);
   activeBots.set(roomId, taskId);

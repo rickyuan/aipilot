@@ -41,12 +41,14 @@ export interface RoomParticipant {
 export interface AIBotConfig {
   /** TRTC room ID for the bot to join */
   roomId: string;
-  /** Bot userId (format: bot_{roomId}) */
+  /** Bot userId (format: bot_{hash}) */
   botUserId: string;
   /** UserSig for the bot */
   botUserSig: string;
+  /** The userId the bot should converse with */
+  targetUserId: string;
+  /** Max idle time in seconds before bot auto-exits (default 60) */
+  maxIdleTime: number;
   /** ASR language configuration */
   asrLanguage: string;
-  /** TTS voice configuration */
-  ttsVoice: string;
 }

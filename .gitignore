@@ -42,3 +42,6 @@ packages/mobile/android/.gradle/
 packages/mobile/android/app/build/
 packages/mobile/android/build/
 packages/mobile/android/local.properties
+.claude/
+main.jsbundle
+packages/mobile/ios/main.jsbundle

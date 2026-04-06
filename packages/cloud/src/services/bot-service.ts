@@ -12,7 +12,7 @@ import { generateBotUserId } from '@deskpilot/shared';
 import type { AIBotConfig } from '@deskpilot/shared';
 import { config } from '../config.js';
 import { generateUserSig } from '../trtc/usersig.js';
-import { createAIConversation, destroyAIConversation } from '../trtc/api.js';
+import { createAIConversation, destroyAIConversation, pushTextToBot } from '../trtc/api.js';
 
 /** Active bot task IDs keyed by roomId */
 const activeBots = new Map<string, string>();
@@ -74,4 +74,29 @@ export async function destroyBot(roomId: string): Promise<boolean> {
  */
 export function hasBotInRoom(roomId: string): boolean {
   return activeBots.has(roomId);
+}
+
+/**
+ * Makes the bot in a room speak a text message via TTS.
+ * @param roomId - The room ID
+ * @param text - Text for the bot to speak
+ * @param interrupt - Whether to interrupt current speech
+ * @returns Whether the push was successful
+ */
+export async function botSpeak(roomId: string, text: string, interrupt = true): Promise<boolean> {
+  const taskId = activeBots.get(roomId);
+  if (!taskId) {
+    console.warn(`[Bot] No bot in room ${roomId} — cannot push text`);
+    return false;
+  }
+
+  try {
+    await pushTextToBot(taskId, text, interrupt);
+    console.log(`[Bot] Pushed text to bot in room ${roomId}: "${text.slice(0, 50)}..."`);
+    return true;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Unknown';
+    console.error(`[Bot] Failed to push text: ${msg}`);
+    return false;
+  }
 }

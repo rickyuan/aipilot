@@ -21,6 +21,10 @@ export interface CommandPayload {
   timestamp: number;
   /** HMAC signature for per-session verification */
   signature: string;
+  /** Conversation context from previous rounds (e.g. lint errors to fix) */
+  context?: string;
+  /** Active workspace path on the PC Agent */
+  workspacePath?: string;
 }
 
 /** Result sent back from PC Agent to the bot after command execution */
@@ -47,5 +51,11 @@ export type WsMessage =
   | { type: 'classified_command'; command: CommandPayload; roomId: string }
   | { type: 'command_result'; result: CommandResult; roomId: string }
   | { type: 'bot_feedback'; text: string; roomId: string }
+  | { type: 'screen_share_request'; roomId: string; mobileUserId: string }
+  | { type: 'screen_share_stop'; roomId: string; mobileUserId: string }
+  | { type: 'screen_share_started'; roomId: string }
+  | { type: 'screen_share_stopped'; roomId: string }
+  | { type: 'mobile_connected'; roomId: string; mobileUserId: string }
+  | { type: 'mobile_disconnected'; roomId: string; mobileUserId: string }
   | { type: 'ping' }
   | { type: 'pong' };

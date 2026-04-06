@@ -11,7 +11,7 @@ import type { Session, TRTCRoomConfig } from '@deskpilot/shared';
 import { Platform } from 'react-native';
 
 const DEV_HOST = Platform.OS === 'ios' && !Platform.isTV
-  ? '192.168.1.12'  // Mac's LAN IP for real device; change if your IP differs
+  ? '192.168.1.58'  // Mac's LAN IP for real device; change if your IP differs
   : 'localhost';
 
 const API_BASE = __DEV__

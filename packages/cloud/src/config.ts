@@ -29,7 +29,12 @@ const envSchema = z.object({
   ELEVENLABS_API_KEY: z.string().min(1).optional(),
   ELEVENLABS_VOICE_ID: z.string().min(1).optional(),
 
-  // Groq LLM (for intent classification)
+  // LLM Gateway (OpenAI-compatible, e.g. OpenClaw, Groq, OpenAI)
+  LLM_API_KEY: z.string().min(1).optional(),
+  LLM_API_URL: z.string().optional(),
+  LLM_MODEL: z.string().optional(),
+
+  // Legacy Groq config (fallback to LLM_* if not set)
   GROQ_API_KEY: z.string().min(1).optional(),
   GROQ_API_URL: z.string().optional(),
   GROQ_MODEL: z.string().optional(),

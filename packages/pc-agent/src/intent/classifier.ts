@@ -141,6 +141,8 @@ function fallbackClassify(utterance: string): ClassifiedIntent {
   const rules: Array<{ keywords: string[]; type: IntentType; params: Record<string, unknown> }> = [
     { keywords: ['yes', 'go ahead', 'confirm', 'do it', '好的', '确认', '是的'], type: 'confirm.yes', params: {} },
     { keywords: ['no', 'cancel', 'stop', 'don\'t', '不', '取消', '停'], type: 'confirm.no', params: {} },
+    { keywords: ['继续上次', '上次的项目', 'continue last', 'last project', 'recent project'], type: 'workspace.recent', params: {} },
+    { keywords: ['lint', 'test', '测试', '检查', 'refactor', '重构'], type: 'code.task', params: { description: utterance } },
     { keywords: ['create', 'new', 'make', '创建', '新建'], type: 'code.create', params: { description: utterance } },
     { keywords: ['fix', 'edit', 'change', 'update', 'modify', '修改', '修复'], type: 'code.edit', params: { description: utterance } },
     { keywords: ['explain', 'what does', 'how does', '解释', '什么意思'], type: 'code.explain', params: { description: utterance } },

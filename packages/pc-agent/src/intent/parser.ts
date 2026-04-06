@@ -64,7 +64,9 @@ function buildInstruction(intent: ClassifiedIntent): string {
     'code.create': () => asString(params['description']) || intent.rawUtterance,
     'code.edit': () => asString(params['description']) || intent.rawUtterance,
     'code.explain': () => asString(params['description']) || intent.rawUtterance,
+    'code.task': () => asString(params['description']) || intent.rawUtterance,
     'editor.action': () => asString(params['action']) || intent.rawUtterance,
+    'workspace.recent': () => asString(params['projectName']) || 'recent',
     'confirm.yes': () => '',
     'confirm.no': () => '',
   };

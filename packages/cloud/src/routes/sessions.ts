@@ -8,7 +8,7 @@
 
 import { Router } from 'express';
 import { z } from 'zod/v4';
-import { createSession, getSession, endSession, generateRoomConfig } from '../services/room-service.js';
+import { createSession, getSession, endSession, generateRoomConfig, registerDevice } from '../services/room-service.js';
 
 export const sessionRouter = Router();
 
@@ -42,6 +42,34 @@ sessionRouter.get('/:id', async (req, res) => {
     return;
   }
   res.json({ session });
+});
+
+/** POST /api/sessions/register-device — Register a persistent PC device */
+sessionRouter.post('/register-device', async (req, res) => {
+  const schema = z.object({
+    pcId: z.string().min(1),
+    displayName: z.string().optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid input' });
+    return;
+  }
+
+  try {
+    const device = await registerDevice(parsed.data.pcId, parsed.data.displayName);
+    const roomConfig = generateRoomConfig(device.roomId, parsed.data.pcId);
+    res.status(200).json({
+      pcId: parsed.data.pcId,
+      pairingCode: device.pairingCode,
+      roomId: device.roomId,
+      hmacKey: device.hmacKey,
+      roomConfig,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ error: message });
+  }
 });
 
 /** POST /api/sessions/:id/end — End a session */

@@ -1,4 +1,7 @@
 {
   "name": "DeskPilot",
-  "displayName": "DeskPilot"
+  "displayName": "DeskPilot",
+  "reactNativeArchitecture": {
+    "newArchEnabled": false
+  }
 }

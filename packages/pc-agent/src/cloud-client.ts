@@ -56,6 +56,34 @@ export async function generatePairingCode(pcUserId: string): Promise<PairingResp
   return res.json() as Promise<PairingResponse>;
 }
 
+interface DeviceRegistration {
+  pcId: string;
+  pairingCode: string;
+  roomId: string;
+  hmacKey: string;
+  roomConfig: TRTCRoomConfig;
+}
+
+/**
+ * Registers this PC as a persistent device. Returns existing config if already registered.
+ * @param pcId - Persistent PC device ID
+ * @param displayName - Human-readable name
+ * @returns Device registration with persistent room and pairing code
+ */
+export async function registerDeviceWithCloud(pcId: string, displayName: string): Promise<DeviceRegistration> {
+  const res = await fetch(`${config.DESKPILOT_CLOUD_URL}/api/sessions/register-device`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pcId, displayName }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to register device: ${String(res.status)}`);
+  }
+
+  return res.json() as Promise<DeviceRegistration>;
+}
+
 /**
  * Gets a TRTC room config for joining.
  * @param roomId - The TRTC room ID

@@ -13,13 +13,18 @@ import type { WsMessage, CommandResult } from '@deskpilot/shared';
 import { config } from './config.js';
 import { processUtterance } from './intent/pipeline.js';
 import { routeCommand } from './executors/router.js';
+import { isClaudeCodeAvailable, executeWithClaudeCode } from './executors/claude-code.js';
+import { isClaudeDesktopRunning, sendToClaudeDesktop } from './executors/claude-desktop.js';
 
 let ws: WebSocket | null = null;
 let reconnectAttempts = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let currentRoomId = '';
 let currentUserId = '';
+let currentSessionId = '';
 let sessionHmacKey = '';
+let onScreenShareRequest: (() => void) | null = null;
+let onScreenShareStop: (() => void) | null = null;
 
 const MAX_RECONNECT_DELAY = 30000;
 const BASE_RECONNECT_DELAY = 1000;
@@ -29,14 +34,30 @@ const BASE_RECONNECT_DELAY = 1000;
  * @param roomId - The TRTC room ID
  * @param userId - This PC Agent's user ID
  * @param hmacKey - Per-session HMAC key for command signing
+ * @param sessionId - Session ID for conversation history tracking
+ * @param onShareRequest - Callback when mobile requests screen share
+ * @param onShareStop - Callback when mobile stops screen share
  */
-export function connectToCloudWs(roomId: string, userId: string, hmacKey: string): void {
+export function connectToCloudWs(
+  roomId: string,
+  userId: string,
+  hmacKey: string,
+  sessionId?: string,
+  onShareRequest?: () => void,
+  onShareStop?: () => void,
+): void {
   currentRoomId = roomId;
   currentUserId = userId;
+  currentSessionId = sessionId ?? '';
   sessionHmacKey = hmacKey;
+  onScreenShareRequest = onShareRequest ?? null;
+  onScreenShareStop = onShareStop ?? null;
 
   const cloudUrl = config.DESKPILOT_CLOUD_URL.replace(/^http/, 'ws');
-  const wsUrl = `${cloudUrl}/ws/agent?roomId=${encodeURIComponent(roomId)}&userId=${encodeURIComponent(userId)}`;
+  let wsUrl = `${cloudUrl}/ws/agent?roomId=${encodeURIComponent(roomId)}&userId=${encodeURIComponent(userId)}`;
+  if (currentSessionId) {
+    wsUrl += `&sessionId=${encodeURIComponent(currentSessionId)}`;
+  }
 
   console.log(`[WS] Connecting to ${wsUrl}`);
 
@@ -76,28 +97,87 @@ async function handleMessage(msg: WsMessage): Promise<void> {
     return;
   }
 
-  // Pre-classified command from Cloud LLM — skip classification, execute directly
+  // Pre-classified command from Cloud LLM
   if (msg.type === 'classified_command') {
-    console.log(`[WS] Received classified command: ${msg.command.intentType} → ${msg.command.executor}`);
-    console.log(`[WS] Instruction: "${msg.command.instruction.slice(0, 100)}"`);
+    const cmd = msg.command;
+    console.log(`[WS] Received command: ${cmd.intentType} → ${cmd.executor}`);
 
+    // Priority routing:
+    // 1. Simple system commands → direct executors (instant, can do GUI)
+    // 2. Code tasks + Claude Desktop running → send to Claude Desktop (preserves context)
+    // 3. Code tasks + Claude Code CLI → spawn claude --print
+    // 4. Fallback → intent-based routing
+
+    // Direct executors for simple/GUI tasks
+    if (cmd.executor === 'browser' || cmd.executor === 'shell' || cmd.executor === 'vscode' || cmd.executor === 'workspace') {
+      console.log(`[WS] Direct executor: ${cmd.executor}`);
+      try {
+        const result = await routeCommand(cmd);
+        sendResult(result);
+      } catch (err: unknown) {
+        console.error(`[WS] ${cmd.executor} error:`, err);
+      }
+      return;
+    }
+
+    // Code tasks → prefer Claude Desktop (preserves user's existing context)
+    if (isClaudeDesktopRunning()) {
+      console.log(`[WS] Sending to Claude Desktop: "${cmd.instruction.slice(0, 80)}"`);
+      try {
+        const result = await sendToClaudeDesktop(cmd.instruction);
+        sendResult({ ...result, commandId: cmd.commandId });
+      } catch (err: unknown) {
+        console.error('[WS] Claude Desktop error:', err);
+      }
+      return;
+    }
+
+    // Fallback: Claude Code CLI
+    if (isClaudeCodeAvailable()) {
+      console.log(`[WS] Routing to Claude Code CLI: "${cmd.instruction.slice(0, 80)}"`);
+      try {
+        const result = await executeWithClaudeCode(cmd.instruction, cmd.workspacePath);
+        sendResult({ ...result, commandId: cmd.commandId });
+      } catch (err: unknown) {
+        console.error('[WS] Claude Code error:', err);
+      }
+      return;
+    }
+
+    // No Claude Code — use intent-based routing
     try {
-      const result = await routeCommand(msg.command);
+      const result = await routeCommand(cmd);
       sendResult(result);
-
-      const status = result.success ? 'OK' : `FAILED: ${result.error ?? 'unknown'}`;
-      console.log(`[WS] Command ${msg.command.commandId} ${status}`);
     } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : 'Unknown error';
-      console.error(`[WS] Command execution error: ${errMsg}`);
+      console.error('[WS] Command error:', err);
     }
     return;
   }
 
-  // Legacy: raw utterance — classify locally (fallback if Cloud LLM is unavailable)
+  // Raw utterance from TRTC bot
   if (msg.type === 'utterance') {
     console.log(`[WS] Received utterance: "${msg.text}"`);
 
+    // Priority: Claude Desktop > Claude Code CLI > intent pipeline
+    if (isClaudeDesktopRunning()) {
+      console.log('[WS] Sending utterance to Claude Desktop');
+      const result = await sendToClaudeDesktop(msg.text);
+      if (result) {
+        sendResult(result);
+      }
+      return;
+    }
+
+    if (isClaudeCodeAvailable()) {
+      console.log('[WS] Claude Code available — sending directly');
+      const result = await executeWithClaudeCode(msg.text);
+      if (result) {
+        sendResult(result);
+      }
+      return;
+    }
+
+    // Fallback: use intent classification pipeline
     const result = await processUtterance(msg.text, sessionHmacKey);
     if (result) {
       sendResult(result);
@@ -107,6 +187,34 @@ async function handleMessage(msg: WsMessage): Promise<void> {
 
   if (msg.type === 'bot_feedback') {
     console.log(`[WS] Bot feedback: "${msg.text}"`);
+    return;
+  }
+
+  // Screen share control from mobile
+  if (msg.type === 'screen_share_request') {
+    console.log(`[WS] Screen share requested by ${msg.mobileUserId}`);
+    if (onScreenShareRequest) {
+      onScreenShareRequest();
+    }
+    return;
+  }
+
+  if (msg.type === 'screen_share_stop') {
+    console.log(`[WS] Screen share stop by ${msg.mobileUserId}`);
+    if (onScreenShareStop) {
+      onScreenShareStop();
+    }
+    return;
+  }
+
+  if (msg.type === 'mobile_connected') {
+    console.log(`[WS] Mobile connected: ${msg.mobileUserId}`);
+    return;
+  }
+
+  if (msg.type === 'mobile_disconnected') {
+    console.log(`[WS] Mobile disconnected: ${msg.mobileUserId}`);
+    return;
   }
 }
 
@@ -149,7 +257,7 @@ function scheduleReconnect(): void {
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     reconnectAttempts++;
-    connectToCloudWs(currentRoomId, currentUserId, sessionHmacKey);
+    connectToCloudWs(currentRoomId, currentUserId, sessionHmacKey, currentSessionId, onScreenShareRequest ?? undefined, onScreenShareStop ?? undefined);
   }, delay);
 }
 

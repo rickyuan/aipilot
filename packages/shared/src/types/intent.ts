@@ -8,28 +8,32 @@ export type IntentType =
   | 'code.create'
   | 'code.edit'
   | 'code.explain'
+  | 'code.task'
   | 'file.create'
   | 'file.navigate'
   | 'editor.action'
   | 'shell.exec'
   | 'browser.open'
   | 'system.status'
+  | 'workspace.recent'
   | 'confirm.yes'
   | 'confirm.no';
 
-export type ExecutorType = 'claude-code' | 'vscode' | 'shell' | 'browser';
+export type ExecutorType = 'claude-code' | 'vscode' | 'shell' | 'browser' | 'workspace';
 
 /** Mapping from intent type to the executor that handles it */
 export const INTENT_EXECUTOR_MAP: Record<IntentType, ExecutorType | null> = {
   'code.create': 'claude-code',
   'code.edit': 'claude-code',
   'code.explain': 'claude-code',
+  'code.task': 'claude-code',
   'file.create': 'shell',
   'file.navigate': 'vscode',
   'editor.action': 'vscode',
   'shell.exec': 'shell',
   'browser.open': 'browser',
   'system.status': 'shell',
+  'workspace.recent': 'workspace',
   'confirm.yes': null,
   'confirm.no': null,
 };

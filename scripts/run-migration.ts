@@ -43,9 +43,24 @@ const statements = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_pairings_code ON pairings(pairing_code) WHERE consumed = false`,
   `CREATE INDEX IF NOT EXISTS idx_pairings_pc_user ON pairings(pc_user_id)`,
+  // Conversation history table
+  `CREATE TABLE IF NOT EXISTS conversation_rounds (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    round_id TEXT NOT NULL,
+    user_utterance TEXT NOT NULL DEFAULT '',
+    intent_type TEXT NOT NULL DEFAULT '',
+    instruction TEXT NOT NULL DEFAULT '',
+    executor_output TEXT NOT NULL DEFAULT '',
+    bot_response TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_conversation_session ON conversation_rounds(session_id, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_conversation_round ON conversation_rounds(session_id, round_id)`,
   // RLS
   `ALTER TABLE sessions ENABLE ROW LEVEL SECURITY`,
   `ALTER TABLE pairings ENABLE ROW LEVEL SECURITY`,
+  `ALTER TABLE conversation_rounds ENABLE ROW LEVEL SECURITY`,
   // Policies (use DO block to handle if-exists)
   `DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'sessions' AND policyname = 'Service role full access on sessions') THEN
@@ -55,6 +70,11 @@ const statements = [
   `DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'pairings' AND policyname = 'Service role full access on pairings') THEN
       CREATE POLICY "Service role full access on pairings" ON pairings FOR ALL USING (true) WITH CHECK (true);
+    END IF;
+  END $$`,
+  `DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'conversation_rounds' AND policyname = 'Service role full access on conversation_rounds') THEN
+      CREATE POLICY "Service role full access on conversation_rounds" ON conversation_rounds FOR ALL USING (true) WITH CHECK (true);
     END IF;
   END $$`,
 ];
@@ -93,6 +113,14 @@ async function runMigration(): Promise<void> {
     console.log(`  pairings: ✗ ${pairErr.message}`);
   } else {
     console.log('  pairings: ✓');
+  }
+
+  // Test conversation_rounds table
+  const { error: convErr } = await supabase.from('conversation_rounds').select('id').limit(1);
+  if (convErr) {
+    console.log(`  conversation_rounds: ✗ ${convErr.message}`);
+  } else {
+    console.log('  conversation_rounds: ✓');
   }
 }
 

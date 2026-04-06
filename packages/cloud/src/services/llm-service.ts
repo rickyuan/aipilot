@@ -8,6 +8,7 @@
 import { config } from '../config.js';
 import type { IntentType, ExecutorType } from '@deskpilot/shared';
 import { INTENT_EXECUTOR_MAP } from '@deskpilot/shared';
+import type { ConversationRound } from './conversation-service.js';
 
 /** Result from LLM classification */
 export interface LLMClassification {
@@ -47,10 +48,12 @@ Intent types and what to put in "instruction":
 - "code.create": Description of what to create. E.g. "create a login component" → instruction "Create a React login component with email and password fields"
 - "code.edit": Description of the edit. E.g. "fix the bug on line 42" → instruction "Fix the bug on line 42 of the current file"
 - "code.explain": What to explain. E.g. "explain this function" → instruction "Explain the current function"
+- "code.task": A coding task that needs Claude Code to execute (run lint, fix errors, refactor, etc.). E.g. "run lint and summarize errors" → instruction "Run pnpm lint and summarize the errors". Use this for multi-step or complex coding tasks.
 - "file.create": Shell command to create. E.g. "create utils.ts" → instruction "touch utils.ts"
 - "file.navigate": File/folder path. E.g. "open the src folder" → instruction "src/"
 - "editor.action": VS Code action. E.g. "run this file" → instruction "workbench.action.debug.run"
 - "browser.open": URL to open. E.g. "open localhost 3000" → instruction "http://localhost:3000"
+- "workspace.recent": Open a recent project. E.g. "continue last project" → instruction "recent". E.g. "open cpaaas-portal" → instruction "cpaaas-portal"
 - "confirm.yes": User confirms. instruction ""
 - "confirm.no": User cancels. instruction ""
 
@@ -58,11 +61,18 @@ Parameters to extract:
 - shell.exec: {"command": "the shell command"}
 - system.status: {"query": "what to check"}
 - code.*: {"description": "what to do"}
+- code.task: {"description": "the full task description"}
 - file.create: {"filename": "name"}
 - file.navigate: {"path": "path"}
 - browser.open: {"url": "url"}
 - editor.action: {"action": "action name"}
+- workspace.recent: {"projectName": "name if specified, otherwise empty"}
 - confirm.*: {}
+
+Additional context:
+- You may receive conversation history. Use it to resolve references like "fix those", "do that again", "the errors from before".
+- If the user says something that references a previous round (e.g. "帮我修掉" after a lint check), use the previous executor output to build a specific instruction.
+- For "code.task" intent: use this when the user describes a coding task that requires Claude Code (e.g. "run lint and summarize", "fix those errors", "refactor this function").
 
 Keep ttsResponse short and conversational. Use the user's language (if they speak Chinese, respond in Chinese).`;
 
@@ -84,20 +94,38 @@ interface OpenAIChatResponse {
  * @param utterance - The raw ASR text from the user
  * @returns Classification result with intent, instruction, and TTS response
  */
-export async function classifyWithLLM(utterance: string): Promise<LLMClassification> {
-  const apiKey = config.GROQ_API_KEY;
-  const apiUrl = config.GROQ_API_URL ?? 'https://api.groq.com/openai/v1/chat/completions';
-  const model = config.GROQ_MODEL ?? 'openai/gpt-oss-120b';
+export async function classifyWithLLM(
+  utterance: string,
+  history?: ConversationRound[],
+): Promise<LLMClassification> {
+  // Prefer LLM_* config, fall back to legacy GROQ_* config
+  const apiKey = config.LLM_API_KEY ?? config.GROQ_API_KEY;
+  const apiUrl = config.LLM_API_URL ?? config.GROQ_API_URL ?? 'https://api.groq.com/openai/v1/chat/completions';
+  const model = config.LLM_MODEL ?? config.GROQ_MODEL ?? 'openai/gpt-oss-120b';
 
   if (!apiKey) {
-    console.log('[LLM] No GROQ_API_KEY, using fallback classifier');
+    console.log('[LLM] No LLM_API_KEY configured, using fallback classifier');
     return fallbackClassify(utterance);
   }
 
+  // Build messages: system → conversation history → current utterance
   const messages: OpenAIChatMessage[] = [
     { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'user', content: utterance },
   ];
+
+  // Include recent conversation rounds as context
+  if (history && history.length > 0) {
+    for (const round of history) {
+      messages.push({ role: 'user', content: round.userUtterance });
+      let assistantContent = round.botResponse;
+      if (round.executorOutput) {
+        assistantContent += `\n[Execution result: ${round.executorOutput.slice(0, 500)}]`;
+      }
+      messages.push({ role: 'assistant', content: assistantContent });
+    }
+  }
+
+  messages.push({ role: 'user', content: utterance });
 
   try {
     const res = await fetch(apiUrl, {
@@ -111,7 +139,7 @@ export async function classifyWithLLM(utterance: string): Promise<LLMClassificat
 
     if (!res.ok) {
       const errText = await res.text();
-      throw new Error(`Groq API error ${String(res.status)}: ${errText.slice(0, 200)}`);
+      throw new Error(`LLM API error ${String(res.status)}: ${errText.slice(0, 200)}`);
     }
 
     const data = await res.json() as OpenAIChatResponse;
@@ -149,9 +177,10 @@ function parseLLMResponse(content: string, utterance: string): LLMClassification
     };
 
     const validTypes: IntentType[] = [
-      'code.create', 'code.edit', 'code.explain',
+      'code.create', 'code.edit', 'code.explain', 'code.task',
       'file.create', 'file.navigate',
       'editor.action', 'shell.exec', 'browser.open', 'system.status',
+      'workspace.recent',
       'confirm.yes', 'confirm.no',
     ];
 
@@ -189,6 +218,8 @@ function fallbackClassify(utterance: string): LLMClassification {
   }> = [
     { keywords: ['yes', 'go ahead', 'confirm', 'do it', '好的', '确认', '是的', '可以'], intentType: 'confirm.yes', instruction: () => '', ttsResponse: 'OK, executing now.' },
     { keywords: ['no', 'cancel', 'stop', 'don\'t', '不', '取消', '停', '算了'], intentType: 'confirm.no', instruction: () => '', ttsResponse: 'Cancelled.' },
+    { keywords: ['继续上次', '上次的项目', 'continue last', 'last project', 'recent project', '最近的项目'], intentType: 'workspace.recent', instruction: () => 'recent', ttsResponse: 'Opening your recent project.' },
+    { keywords: ['lint', 'test', '测试', '检查', 'refactor', '重构'], intentType: 'code.task', instruction: (u) => u, ttsResponse: 'Working on it.' },
     { keywords: ['install', 'npm', 'pnpm', 'pip', 'brew', 'yarn', '安装'], intentType: 'shell.exec', instruction: (u) => u, ttsResponse: 'Running the install command.' },
     { keywords: ['create', 'new file', '创建文件', '新建文件'], intentType: 'file.create', instruction: (u) => u, ttsResponse: 'Creating the file.' },
     { keywords: ['open localhost', 'open http', '打开浏览器'], intentType: 'browser.open', instruction: (u) => u, ttsResponse: 'Opening in the browser.' },

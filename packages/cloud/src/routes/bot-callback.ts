@@ -11,7 +11,8 @@
 import { Router } from 'express';
 import { generateCommandId } from '@deskpilot/shared';
 import { classifyWithLLM } from '../services/llm-service.js';
-import { sendClassifiedCommand } from '../ws/relay.js';
+import { sendClassifiedCommand, getSessionIdForRoom } from '../ws/relay.js';
+import { saveRound, getRecentRounds } from '../services/conversation-service.js';
 
 export const botCallbackRouter = Router();
 
@@ -129,29 +130,63 @@ botCallbackRouter.post('/v1/chat/completions', async (req, res) => {
   // that can find the agent even when roomId doesn't match exactly
 
   try {
-    // Step 1: Classify intent via Groq LLM
-    const classification = await classifyWithLLM(userText);
+    // Step 1: Retrieve conversation history for context
+    const sessionId = getSessionIdForRoom(roomId);
+    const history = sessionId ? await getRecentRounds(sessionId, 5) : [];
+    if (history.length > 0) {
+      console.log(`[Bot Callback] Loaded ${String(history.length)} previous rounds for context`);
+    }
+
+    // Step 2: Classify intent via LLM (with conversation history)
+    const classification = await classifyWithLLM(userText, history);
     console.log(`[Bot Callback] Classified: ${classification.intentType} → ${String(classification.executor)} (confidence: ${String(classification.confidence)})`);
     console.log(`[Bot Callback] Instruction: "${classification.instruction}"`);
     console.log(`[Bot Callback] TTS: "${classification.ttsResponse}"`);
 
-    // Step 2: Send command to PC Agent (fire-and-forget for non-meta intents)
+    const commandId = generateCommandId();
+
+    // Step 3: Send command to PC Agent (fire-and-forget for non-meta intents)
     if (classification.executor && classification.confidence >= 0.4) {
+      // Build context from recent executor outputs for multi-turn tasks
+      let context: string | undefined;
+      if (history.length > 0) {
+        const recentOutputs = history
+          .filter((r) => r.executorOutput)
+          .map((r) => `[${r.intentType}] ${r.userUtterance}\nResult: ${r.executorOutput}`)
+          .join('\n---\n');
+        if (recentOutputs) {
+          context = recentOutputs;
+        }
+      }
+
       const command = {
-        commandId: generateCommandId(),
+        commandId,
         intentType: classification.intentType,
         executor: classification.executor,
         instruction: classification.instruction,
         parameters: classification.parameters,
         timestamp: Date.now(),
         signature: '', // Cloud-originated commands; PC Agent trusts the WebSocket channel
+        context,
       };
 
       sendClassifiedCommand(roomId, command);
       console.log(`[Bot Callback] Sent command ${command.commandId} to PC Agent`);
     }
 
-    // Step 3: Return TTS response immediately
+    // Step 4: Save this round to conversation history
+    if (sessionId) {
+      await saveRound(sessionId, {
+        roundId: commandId,
+        userUtterance: userText,
+        intentType: classification.intentType,
+        instruction: classification.instruction,
+        executorOutput: '', // Will be updated when PC Agent returns result
+        botResponse: classification.ttsResponse,
+      });
+    }
+
+    // Step 5: Return TTS response immediately
     sendResponse(res, classification.ttsResponse, streaming);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';

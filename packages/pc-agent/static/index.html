@@ -6,33 +6,228 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #0f0f23;
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+      background: #1a1a2e;
       color: #e0e0e0;
       display: flex;
       align-items: center;
       justify-content: center;
       height: 100vh;
-      text-align: center;
+      -webkit-app-region: drag;
+      user-select: none;
     }
-    .container { padding: 32px; }
-    h1 { font-size: 24px; margin-bottom: 8px; }
-    .status { color: #4ade80; font-size: 14px; margin-bottom: 24px; }
-    .info { color: #666; font-size: 12px; line-height: 1.8; }
-    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #4ade80; margin-right: 8px; animation: pulse 2s infinite; }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .container { padding: 24px; text-align: center; width: 100%; }
+    .title { font-size: 15px; font-weight: 600; color: #888; margin-bottom: 16px; letter-spacing: 0.5px; }
+    .code {
+      font-size: 42px; font-weight: 700; letter-spacing: 8px;
+      font-variant-numeric: tabular-nums;
+      color: #fff; margin-bottom: 8px;
+      font-family: 'SF Mono', 'Menlo', monospace;
+    }
+    .code.waiting { color: #555; }
+    .status {
+      font-size: 12px; display: flex; align-items: center;
+      justify-content: center; gap: 6px; margin-bottom: 16px;
+    }
+    .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    .dot.green { background: #4ade80; }
+    .dot.yellow { background: #facc15; }
+    .dot.red { background: #f87171; }
+    .hint { color: #555; font-size: 11px; }
+    .trtc-status { color: #4ade80; font-size: 10px; margin-top: 8px; }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>DeskPilot Agent</h1>
-    <p class="status"><span class="dot"></span>Running</p>
-    <p class="info">
-      Screen capture active<br>
-      Waiting for mobile connection...<br>
-      <br>
-      Check terminal for logs
-    </p>
+    <div class="title">DESKPILOT</div>
+    <div class="code" id="code">------</div>
+    <div class="status">
+      <span class="dot yellow" id="dot"></span>
+      <span id="statusText">Starting...</span>
+    </div>
+    <div class="hint" id="hint">Starting...</div>
+    <div class="trtc-status" id="trtcStatus"></div>
+    <div class="hint" style="margin-top:4px;font-size:10px;color:#555" id="codeNote">This code never expires</div>
   </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+    const codeEl = document.getElementById('code');
+    const dotEl = document.getElementById('dot');
+    const statusEl = document.getElementById('statusText');
+    const hintEl = document.getElementById('hint');
+    const trtcStatusEl = document.getElementById('trtcStatus');
+
+    // ========== TRTC SDK in renderer process ==========
+    let trtcCloud = null;
+    let trtcReady = false;
+
+    function initTRTC() {
+      try {
+        const TRTCCloud = require('trtc-electron-sdk').default;
+        trtcCloud = TRTCCloud.getTRTCShareInstance();
+        trtcReady = true;
+        trtcStatusEl.textContent = 'TRTC SDK loaded';
+        console.log('[TRTC Renderer] SDK loaded');
+        ipcRenderer.send('trtc-ready', true);
+        // Process any queued enterRoom from before SDK was ready
+        if (pendingConfig) {
+          console.log('[TRTC Renderer] Processing queued enterRoom');
+          doEnterRoom(pendingConfig);
+          pendingConfig = null;
+        }
+      } catch (e) {
+        trtcStatusEl.textContent = 'TRTC SDK unavailable: ' + e.message;
+        console.error('[TRTC Renderer] Failed to load SDK:', e.message);
+        ipcRenderer.send('trtc-ready', false);
+      }
+    }
+
+    // Main process asks renderer to join room
+    let pendingConfig = null;
+    ipcRenderer.on('trtc-enter-room', (_event, config) => {
+      if (!trtcCloud) {
+        console.log('[TRTC Renderer] SDK not ready, queuing enterRoom');
+        pendingConfig = config;
+        return;
+      }
+      doEnterRoom(config);
+    });
+
+    function doEnterRoom(config) {
+      console.log('[TRTC Renderer] Entering room:', config.roomId);
+
+      // Must use TRTCParams class instance, not plain object
+      const TRTCParams = require('trtc-electron-sdk').TRTCParams;
+      const params = new TRTCParams();
+      params.sdkAppId = config.sdkAppId;
+      params.userId = config.userId;
+      params.userSig = config.userSig;
+      params.roomId = 0;
+      params.strRoomId = config.roomId;
+
+      trtcCloud.on('onEnterRoom', (elapsed) => {
+        console.log('[TRTC Renderer] Entered room in', elapsed, 'ms');
+        if (elapsed > 0) {
+          trtcStatusEl.textContent = 'In room — starting screen capture';
+          ipcRenderer.send('trtc-entered-room', elapsed);
+          startScreenCapture();
+        } else {
+          trtcStatusEl.textContent = 'Room join failed: ' + elapsed;
+          ipcRenderer.send('trtc-error', 'Room join failed: ' + elapsed);
+        }
+      });
+
+      trtcCloud.on('onExitRoom', (reason) => {
+        console.log('[TRTC Renderer] Exited room, reason:', reason);
+        trtcStatusEl.textContent = 'Left room';
+      });
+
+      trtcCloud.on('onError', (errCode, errMsg) => {
+        console.error('[TRTC Renderer] Error', errCode, errMsg);
+        ipcRenderer.send('trtc-error', errCode + ': ' + errMsg);
+      });
+
+      trtcCloud.on('onRemoteUserEnterRoom', (userId) => {
+        console.log('[TRTC Renderer] Remote user:', userId);
+        ipcRenderer.send('trtc-remote-user-enter', userId);
+      });
+
+      trtcCloud.on('onRemoteUserLeaveRoom', (userId) => {
+        ipcRenderer.send('trtc-remote-user-leave', userId);
+      });
+
+      trtcCloud.on('onRecvCustomCmdMsg', (userId, cmdId, seq, msg) => {
+        ipcRenderer.send('trtc-custom-msg', { userId, cmdId, seq, msg: msg.toString() });
+      });
+
+      trtcCloud.enterRoom(params, 0); // VIDEOCALL
+    }
+
+    // Screen capture
+    function startScreenCapture() {
+      if (!trtcCloud) return;
+
+      const sdk = require('trtc-electron-sdk');
+      const Rect = sdk.Rect;
+      const TRTCScreenCaptureProperty = sdk.TRTCScreenCaptureProperty;
+      const TRTCVideoEncParam = sdk.TRTCVideoEncParam;
+      const TRTCVideoStreamType = sdk.TRTCVideoStreamType;
+
+      const sources = trtcCloud.getScreenCaptureSources(160, 90, 32, 32);
+      console.log('[TRTC Renderer] Screen sources:', sources.length);
+
+      const primary = sources.find(s => s.type === 1 && s.isMainScreen)
+        || sources.find(s => s.type === 1)
+        || sources[0];
+
+      if (!primary) {
+        trtcStatusEl.textContent = 'No screen sources found';
+        return;
+      }
+
+      console.log('[TRTC Renderer] Selected:', primary.sourceName, 'type:', primary.type, 'id:', primary.sourceId);
+
+      const captureRect = new Rect();
+      captureRect.left = 0;
+      captureRect.top = 0;
+      captureRect.right = 0;
+      captureRect.bottom = 0;
+
+      const captureProperty = new TRTCScreenCaptureProperty();
+      captureProperty.enableCaptureMouse = true;
+      captureProperty.enableHighLight = false;
+      captureProperty.enableHighPerformance = true;
+
+      trtcCloud.selectScreenCaptureTarget(primary, captureRect, captureProperty);
+
+      const encParam = new TRTCVideoEncParam();
+      encParam.videoResolution = 114; // 1920x1080
+      encParam.videoFps = 15;
+      encParam.videoBitrate = 2000;
+
+      trtcCloud.startScreenCapture(null, TRTCVideoStreamType.TRTCVideoStreamTypeSub, encParam);
+
+      trtcStatusEl.textContent = 'Screen sharing active';
+      console.log('[TRTC Renderer] Screen capture started (1080p)');
+      ipcRenderer.send('trtc-screen-started');
+    }
+
+    // Send custom message (command result from main process)
+    ipcRenderer.on('trtc-send-custom-msg', (_event, data) => {
+      if (!trtcCloud) return;
+      trtcCloud.sendCustomCmdMsg(1, data, true, true);
+    });
+
+    // Exit room
+    ipcRenderer.on('trtc-exit-room', () => {
+      if (!trtcCloud) {
+        return;
+      }
+      try { trtcCloud.stopScreenCapture(); } catch(e) {}
+      trtcCloud.exitRoom();
+    });
+
+    // UI updates from main process
+    ipcRenderer.on('status-update', (_event, data) => {
+      if (data.pairingCode) {
+        codeEl.textContent = data.pairingCode;
+        codeEl.classList.remove('waiting');
+        hintEl.textContent = 'Enter this code on your mobile app';
+      }
+      if (data.status) {
+        statusEl.textContent = data.status;
+        dotEl.className = data.status.includes('Connected') ? 'dot green'
+          : data.status.includes('Error') ? 'dot red' : 'dot yellow';
+      }
+    });
+
+    // Initialize TRTC SDK on load
+    initTRTC();
+  </script>
 </body>
 </html>

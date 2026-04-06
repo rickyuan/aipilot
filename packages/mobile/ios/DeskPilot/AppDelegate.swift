@@ -40,7 +40,7 @@ class ReactNativeDelegate: RCTDefaultReactNativeFactoryDelegate {
 
   override func bundleURL() -> URL? {
 #if DEBUG
-    return URL(string: "http://192.168.1.12:8081/index.bundle?platform=ios&dev=true&lazy=true")
+    return URL(string: "http://192.168.1.58:8082/index.bundle?platform=ios&dev=true&lazy=true")
 #else
     return Bundle.main.url(forResource: "main", withExtension: "jsbundle")
 #endif

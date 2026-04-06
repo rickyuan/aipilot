@@ -8,6 +8,7 @@ import { executeClaudeCode } from './claude-code.js';
 import { executeShell } from './shell.js';
 import { executeVSCode } from './vscode.js';
 import { executeBrowser } from './browser.js';
+import { executeWorkspace } from './workspace.js';
 import { auditLog } from '../audit.js';
 
 /**
@@ -37,6 +38,9 @@ export async function routeCommand(command: CommandPayload): Promise<CommandResu
         break;
       case 'browser':
         result = await executeBrowser(command);
+        break;
+      case 'workspace':
+        result = await executeWorkspace(command);
         break;
       default: {
         const exhaustive: never = command.executor;

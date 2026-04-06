@@ -14,6 +14,7 @@ import { sessionRouter } from './routes/sessions.js';
 import { pairingRouter } from './routes/pairing.js';
 import { roomRouter } from './routes/rooms.js';
 import { botCallbackRouter } from './routes/bot-callback.js';
+import { screenShareRouter } from './routes/screen-share.js';
 import { cleanupTimedOutSessions } from './services/room-service.js';
 import { cleanupExpiredPairings } from './services/pairing-service.js';
 import { initWebSocketRelay } from './ws/relay.js';
@@ -38,6 +39,7 @@ app.use('/api/sessions', sessionRouter);
 app.use('/api/pairing', pairingRouter);
 app.use('/api/rooms', roomRouter);
 app.use('/api/bot', botCallbackRouter);
+app.use('/api/screen-share', screenShareRouter);
 
 // Initialize WebSocket relay
 initWebSocketRelay(server);

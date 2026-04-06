@@ -1,0 +1,19 @@
+name: DeskPilot
+options:
+  bundleIdPrefix: com.deskpilot.native
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "26.4"
+targets:
+  DeskPilot:
+    type: application
+    platform: iOS
+    sources:
+      - DeskPilot
+    settings:
+      base:
+        INFOPLIST_FILE: DeskPilot/Info.plist
+        INFOPLIST_KEY_UILaunchScreen_Generation: true
+        SWIFT_VERSION: "5"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: Q4Q63XS9AM

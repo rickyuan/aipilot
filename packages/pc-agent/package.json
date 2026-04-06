@@ -7,6 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "dev:electron": "tsc && electron .",
     "build": "tsc",
+    "build:electron": "tsc && electron-builder --mac",
     "start": "node dist/index.js",
     "start:electron": "electron .",
     "test": "vitest run",
@@ -19,11 +20,35 @@
     "@deskpilot/shared": "workspace:*",
     "dotenv": "^17.3.1",
     "trtc-electron-sdk": "^12.7.706",
+    "trtc-sdk-v5": "^5.16.0",
     "ws": "^8.19.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",
-    "electron": "^33.4.11"
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.deskpilot.agent",
+    "productName": "DeskPilot",
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": ["dmg"],
+      "extraFiles": [
+        {
+          "from": "node_modules/trtc-electron-sdk/build/Release/${arch}/trtc_electron_sdk.node",
+          "to": "./"
+        },
+        {
+          "from": "node_modules/trtc-electron-sdk/build/mac-framework/${arch}/",
+          "to": "./Frameworks"
+        }
+      ]
+    },
+    "files": [
+      "dist/**/*",
+      "static/**/*"
+    ]
   }
 }

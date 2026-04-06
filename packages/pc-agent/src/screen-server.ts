@@ -97,6 +97,21 @@ export function startScreenServer(port = 8089): ReturnType<typeof createServer> 
       return;
     }
 
+    // Serve trtc-sdk-v5 from node_modules
+    if (url.pathname === '/trtc.js') {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const sdkPath: string = require.resolve('trtc-sdk-v5/trtc.js');
+        const content = await readFile(sdkPath);
+        res.writeHead(200, { 'Content-Type': 'application/javascript' });
+        res.end(content);
+      } catch {
+        res.writeHead(404);
+        res.end('TRTC SDK not found — run pnpm install');
+      }
+      return;
+    }
+
     // Serve static files
     const filePath = url.pathname === '/' ? '/screen-share.html' : url.pathname;
     const fullPath = resolve(staticDir, `.${filePath}`);

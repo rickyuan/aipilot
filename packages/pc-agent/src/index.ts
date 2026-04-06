@@ -1,151 +1,169 @@
 /**
  * DeskPilot PC Agent — Daemon entry point.
  *
- * Connects to TRTC room, publishes screen capture,
- * listens for command payloads from the AI bot, and executes them.
+ * Persistent device model:
+ * - First launch: registers with Cloud, gets fixed pairing code
+ * - Connects WebSocket and waits for mobile to request screen share
+ * - Screen capture only starts on demand from mobile
+ * - Stops capture when mobile disconnects, returns to standby
  *
  * Modes:
- *   (default)   — Production: connect to Cloud, create session, show pairing code
+ *   (default)   — Production: register device, standby, on-demand screen share
  *   --demo      — Test command execution without TRTC
  *   --classify  — Test intent classification pipeline
  *   --local     — Local dev mode: WebSocket relay only, no TRTC
  */
 
-import './config.js'; // Load env vars first
-import { hostname } from 'node:os';
-import { exec } from 'node:child_process';
+import './config.js';
 import type { CommandPayload } from '@deskpilot/shared';
-import { joinRoom, startScreenCapture, onCommandReceived, sendCommandResult, simulateIncomingCommand } from './trtc/room.js';
+import { joinRoom, leaveRoom, onCommandReceived, sendCommandResult, simulateIncomingCommand, startScreenCapture } from './trtc/room.js';
 import { routeCommand } from './executors/router.js';
 import { processUtterance } from './intent/pipeline.js';
-import { createSession, generatePairingCode } from './cloud-client.js';
+import { registerDeviceWithCloud, getRoomConfig } from './cloud-client.js';
 import { connectToCloudWs } from './cloud-ws.js';
-import { startScreenServer, setScreenShareConfig, setPcUserId } from './screen-server.js';
+import { loadDeviceConfig, saveDeviceConfig } from './device-config.js';
+import { isClaudeCodeAvailable } from './executors/claude-code.js';
+import { isClaudeDesktopAvailable, isClaudeDesktopRunning } from './executors/claude-desktop.js';
+import type { TRTCRoomConfig } from '@deskpilot/shared';
+
+let currentRoomConfig: TRTCRoomConfig | null = null;
+let isScreenSharing = false;
 
 /**
  * Handles incoming command payloads from the AI bot.
- * @param command - The command to execute
  */
 async function handleCommand(command: CommandPayload): Promise<void> {
   console.log(`[Agent] Received command: ${command.intentType} → ${command.executor}`);
-
   const result = await routeCommand(command);
   sendCommandResult(result);
+  console.log(`[Agent] Command ${command.commandId} ${result.success ? 'completed' : `failed: ${result.error ?? 'unknown'}`}`);
+}
 
-  if (result.success) {
-    console.log(`[Agent] Command ${command.commandId} completed successfully`);
-  } else {
-    console.log(`[Agent] Command ${command.commandId} failed: ${result.error ?? 'unknown'}`);
+/**
+ * Handles screen share request from mobile (via WebSocket).
+ */
+async function handleScreenShareRequest(): Promise<void> {
+  if (isScreenSharing) {
+    console.log('[Agent] Screen share already active');
+    return;
+  }
+  if (!currentRoomConfig) {
+    console.error('[Agent] No room config — cannot start screen share');
+    return;
+  }
+
+  console.log('[Agent] Mobile requested screen share — joining room + starting capture');
+  isScreenSharing = true;
+  await joinRoom(currentRoomConfig);
+  updateElectronStatus('Screen sharing');
+}
+
+/**
+ * Handles screen share stop from mobile.
+ */
+async function handleScreenShareStop(): Promise<void> {
+  if (!isScreenSharing) return;
+
+  console.log('[Agent] Mobile stopped screen share — leaving room');
+  isScreenSharing = false;
+  await leaveRoom();
+  updateElectronStatus('Ready');
+}
+
+/**
+ * Sends status update to Electron window via IPC.
+ */
+function updateElectronStatus(status: string, extra?: Record<string, unknown>): void {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { BrowserWindow } = require('electron');
+    const wins = BrowserWindow.getAllWindows();
+    if (wins.length > 0) {
+      wins[0].webContents.send('status-update', { status, ...extra });
+    }
+  } catch {
+    // Not in Electron
   }
 }
 
 async function main(): Promise<void> {
   console.log('[Agent] Starting DeskPilot PC Agent...');
 
-  // Register command handler
   onCommandReceived((command: CommandPayload) => {
-    handleCommand(command).catch((err: unknown) => {
-      console.error('[Agent] Unhandled error in command handler:', err);
-    });
+    handleCommand(command).catch(console.error);
   });
 
-  // If started with --demo flag, run a quick demo
-  if (process.argv.includes('--demo')) {
-    await runDemo();
-    return;
-  }
+  if (process.argv.includes('--demo')) { await runDemo(); return; }
+  if (process.argv.includes('--classify')) { await runClassifyDemo(); return; }
+  if (process.argv.includes('--local')) { await runLocal(); return; }
 
-  // If started with --classify, run interactive intent classification
-  if (process.argv.includes('--classify')) {
-    await runClassifyDemo();
-    return;
-  }
-
-  // If started with --local, run in local dev mode (WebSocket only, no TRTC)
-  if (process.argv.includes('--local')) {
-    await runLocal();
-    return;
-  }
-
-  // Production mode: connect to Cloud API, create session, show pairing code
   await runProduction();
 }
 
 /**
- * Production mode — connects to Cloud API, creates session,
- * displays pairing code, joins TRTC room, and starts WebSocket relay.
+ * Production mode — persistent device, standby, on-demand screen share.
  */
 async function runProduction(): Promise<void> {
-  const pcUserId = `pc_${hostname()}_${Date.now()}`;
+  // Load or create persistent device identity
+  const deviceConfig = await loadDeviceConfig();
+  console.log(`[Agent] Device ID: ${deviceConfig.pcId}`);
 
-  console.log(`[Agent] PC User ID: ${pcUserId}`);
+  // Detect Claude capabilities
+  const hasClaudeDesktop = isClaudeDesktopAvailable();
+  const hasClaudeCode = isClaudeCodeAvailable();
+  const claudeDesktopRunning = hasClaudeDesktop && isClaudeDesktopRunning();
+
+  if (claudeDesktopRunning) {
+    console.log('[Agent] Claude Desktop: running (voice → Claude Desktop directly, preserves context)');
+  } else if (hasClaudeCode) {
+    console.log('[Agent] Claude Code CLI: available (voice → Claude Code)');
+  } else {
+    console.log('[Agent] No local Claude found (using Cloud LLM intent classification)');
+  }
+
   console.log('[Agent] Connecting to Cloud API...');
 
   try {
-    // Create session
-    const { session, roomConfig } = await createSession(pcUserId);
-    console.log(`[Agent] Session created: ${session.sessionId}`);
-    console.log(`[Agent] Room: ${session.roomId}`);
+    // Register device (idempotent — returns existing if already registered)
+    const registration = await registerDeviceWithCloud(deviceConfig.pcId, deviceConfig.displayName);
 
-    // Generate pairing code
-    const pairing = await generatePairingCode(pcUserId);
+    // Save persistent config locally
+    deviceConfig.pairingCode = registration.pairingCode;
+    deviceConfig.roomId = registration.roomId;
+    deviceConfig.hmacKey = registration.hmacKey;
+    await saveDeviceConfig(deviceConfig);
+
+    currentRoomConfig = registration.roomConfig;
+
+    console.log(`[Agent] Room: ${registration.roomId}`);
     console.log('');
     console.log('======================================');
     console.log('');
-    console.log(`     Pairing Code:  ${pairing.pairingCode}`);
+    console.log(`     Pairing Code:  ${registration.pairingCode}`);
     console.log('');
-    console.log('  Enter this code on your mobile app');
-    console.log(`  Expires: ${new Date(pairing.expiresAt).toLocaleTimeString()}`);
+    console.log('  This code never expires.');
+    console.log('  Enter it once on your mobile app.');
     console.log('');
     console.log('======================================');
     console.log('');
 
-    // Join TRTC room (mock mode — real screen share handled by browser)
-    await joinRoom(roomConfig);
+    // Update Electron window
+    updateElectronStatus('Ready', { pairingCode: registration.pairingCode });
 
-    // Start local screen share server and open browser
-    const screenPort = 8089;
-    startScreenServer(screenPort);
-    setPcUserId(pcUserId);
-    setScreenShareConfig(roomConfig, pairing.pairingCode);
+    // Connect WebSocket — but DON'T join TRTC room yet
+    connectToCloudWs(
+      registration.roomId,
+      deviceConfig.pcId,
+      registration.hmacKey,
+      `sess_persistent_${deviceConfig.pcId}`,
+      handleScreenShareRequest,
+      handleScreenShareStop,
+    );
 
-    // Generate a separate screen-share user config for the browser
-    // The browser joins the same room as a screen-share publisher
-    const screenUserId = `${pcUserId}_screen`;
-    try {
-      const cloudUrl = process.env['CLOUD_URL'] ?? 'http://localhost:3000';
-      const configRes = await fetch(`${cloudUrl}/api/rooms/${encodeURIComponent(session.roomId)}/config?userId=${encodeURIComponent(screenUserId)}`);
-      if (configRes.ok) {
-        const { roomConfig: screenConfig } = await configRes.json() as { roomConfig: typeof roomConfig };
-        setScreenShareConfig(screenConfig, pairing.pairingCode);
-        console.log(`[Agent] Screen share user: ${screenUserId}`);
-      }
-    } catch {
-      // Fall back to the original room config for screen share
-      console.log('[Agent] Using agent room config for screen share');
-    }
-
-    // Auto-open browser for screen sharing
-    const screenUrl = `http://localhost:${String(screenPort)}`;
-    console.log(`[Agent] Opening screen share page: ${screenUrl}`);
-    if (process.platform === 'darwin') {
-      exec(`open "${screenUrl}"`);
-    } else if (process.platform === 'win32') {
-      exec(`start "${screenUrl}"`);
-    } else {
-      exec(`xdg-open "${screenUrl}"`);
-    }
-
-    // Connect to Cloud WebSocket relay for voice command pipeline
-    connectToCloudWs(session.roomId, pcUserId, session.hmacKey);
-
-    console.log('[Agent] Waiting for mobile connection and voice commands...');
+    console.log('[Agent] Standing by — waiting for mobile to connect');
     console.log('[Agent] Press Ctrl+C to stop');
 
-    // Keep process alive
-    await new Promise(() => {
-      // Process stays alive until Ctrl+C
-    });
+    await new Promise(() => {});
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     console.error(`[Agent] Failed to start: ${message}`);
@@ -156,196 +174,74 @@ async function runProduction(): Promise<void> {
 
 /**
  * Local dev mode — WebSocket relay only, no TRTC.
- * Useful for testing the intent pipeline without live TRTC credentials.
  */
 async function runLocal(): Promise<void> {
-  const pcUserId = `pc_${hostname()}_local`;
-
+  const deviceConfig = await loadDeviceConfig();
   console.log('[Agent] Running in LOCAL dev mode (no TRTC)');
-  console.log('[Agent] Connecting to Cloud API...');
 
   try {
-    // Create session
-    const { session, roomConfig } = await createSession(pcUserId);
-    console.log(`[Agent] Session: ${session.sessionId}`);
+    const registration = await registerDeviceWithCloud(deviceConfig.pcId, deviceConfig.displayName);
+    deviceConfig.pairingCode = registration.pairingCode;
+    deviceConfig.roomId = registration.roomId;
+    deviceConfig.hmacKey = registration.hmacKey;
+    await saveDeviceConfig(deviceConfig);
 
-    // Generate pairing code
-    const pairing = await generatePairingCode(pcUserId);
-    console.log('');
-    console.log(`  Pairing Code: ${pairing.pairingCode}`);
-    console.log('');
+    console.log(`  Pairing Code: ${registration.pairingCode} (fixed)`);
 
-    // Start local screen share server
-    const screenPort = 8089;
-    startScreenServer(screenPort);
-    setPcUserId(pcUserId);
+    connectToCloudWs(
+      registration.roomId,
+      deviceConfig.pcId,
+      registration.hmacKey,
+      `sess_local_${deviceConfig.pcId}`,
+    );
 
-    // Generate screen-share user config
-    const screenUserId = `${pcUserId}_screen`;
-    try {
-      const cloudUrl = process.env['CLOUD_URL'] ?? 'http://localhost:3000';
-      const configRes = await fetch(`${cloudUrl}/api/rooms/${encodeURIComponent(session.roomId)}/config?userId=${encodeURIComponent(screenUserId)}`);
-      if (configRes.ok) {
-        const { roomConfig: screenConfig } = await configRes.json() as { roomConfig: typeof roomConfig };
-        setScreenShareConfig(screenConfig, pairing.pairingCode);
-      }
-    } catch {
-      setScreenShareConfig(roomConfig, pairing.pairingCode);
-    }
-
-    // Auto-open browser
-    const screenUrl = `http://localhost:${String(screenPort)}`;
-    console.log(`[Agent] Screen share page: ${screenUrl}`);
-    if (process.platform === 'darwin') {
-      exec(`open "${screenUrl}"`);
-    }
-
-    // Connect to Cloud WebSocket relay (no TRTC room join)
-    connectToCloudWs(session.roomId, pcUserId, session.hmacKey);
-
-    // Support stdin for manual testing (only if TTY)
     if (process.stdin.isTTY) {
-      console.log('[Agent] Type a command to test (or wait for mobile connection):');
-
+      console.log('[Agent] Type a command to test:');
       const readline = await import('node:readline');
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-
       rl.on('line', (line: string) => {
         const utterance = line.trim();
         if (!utterance) return;
-
-        processUtterance(utterance, session.hmacKey).catch((err: unknown) => {
-          console.error('[Agent] Error:', err);
-        });
+        processUtterance(utterance, registration.hmacKey).catch(console.error);
       });
-
-      rl.on('close', () => {
-        process.exit(0);
-      });
+      rl.on('close', () => process.exit(0));
     } else {
-      console.log('[Agent] Waiting for commands via WebSocket relay...');
-      console.log('[Agent] Press Ctrl+C to stop');
-
-      // Keep process alive
-      await new Promise(() => {
-        // Process stays alive until Ctrl+C
-      });
+      console.log('[Agent] Waiting for commands via WebSocket...');
+      await new Promise(() => {});
     }
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    console.error(`[Agent] Failed to start local mode: ${message}`);
+    console.error(`[Agent] Failed: ${err instanceof Error ? err.message : 'Unknown'}`);
     process.exit(1);
   }
 }
 
-/**
- * Demo mode — tests command execution without TRTC.
- */
 async function runDemo(): Promise<void> {
-  console.log('[Agent] Running in demo mode...\n');
+  console.log('[Agent] Demo mode...\n');
+  await joinRoom({ sdkAppId: 0, roomId: 'demo', userId: 'demo_pc', userSig: 'demo' });
 
-  // Simulate joining a room
-  await joinRoom({
-    sdkAppId: 0,
-    roomId: 'demo_room',
-    userId: 'demo_pc',
-    userSig: 'demo_sig',
-  });
-
-  await startScreenCapture();
-
-  // Test: shell command (allowed)
-  console.log('\n--- Test 1: Allowed shell command ---');
   simulateIncomingCommand({
-    commandId: 'demo_1',
-    intentType: 'shell.exec',
-    executor: 'shell',
+    commandId: 'demo_1', intentType: 'shell.exec', executor: 'shell',
     instruction: 'echo "Hello from DeskPilot!"',
-    parameters: {},
-    timestamp: Date.now(),
-    signature: 'demo',
+    parameters: {}, timestamp: Date.now(), signature: 'demo',
   });
-
-  // Give it time to execute
-  await sleep(1000);
-
-  // Test: blocked command (sudo)
-  console.log('\n--- Test 2: Blocked command ---');
-  simulateIncomingCommand({
-    commandId: 'demo_2',
-    intentType: 'shell.exec',
-    executor: 'shell',
-    instruction: 'sudo rm -rf /',
-    parameters: {},
-    timestamp: Date.now(),
-    signature: 'demo',
-  });
-
-  await sleep(1000);
-
-  // Test: destructive command (needs confirmation)
-  console.log('\n--- Test 3: Destructive command (needs confirmation) ---');
-  simulateIncomingCommand({
-    commandId: 'demo_3',
-    intentType: 'shell.exec',
-    executor: 'shell',
-    instruction: 'rm some-file.txt',
-    parameters: {},
-    timestamp: Date.now(),
-    signature: 'demo',
-  });
-
-  await sleep(1000);
-
-  // Test: system status
-  console.log('\n--- Test 4: System status ---');
-  simulateIncomingCommand({
-    commandId: 'demo_4',
-    intentType: 'system.status',
-    executor: 'shell',
-    instruction: 'pwd && ls -la',
-    parameters: {},
-    timestamp: Date.now(),
-    signature: 'demo',
-  });
-
   await sleep(2000);
   console.log('\n[Agent] Demo complete.');
 }
 
-/**
- * Interactive intent classification demo.
- * Tests the full pipeline: utterance → classify → command → execute.
- */
 async function runClassifyDemo(): Promise<void> {
-  console.log('[Agent] Intent classification demo\n');
-
+  console.log('[Agent] Classification demo\n');
   await joinRoom({ sdkAppId: 0, roomId: 'demo', userId: 'demo_pc', userSig: 'demo' });
 
-  const testUtterances = [
-    'Install express with npm',
-    'Create a React login component',
-    'What is running on port 3000',
-    'Open localhost:8080 in the browser',
-    'Yes, go ahead',
-    'Fix the bug in app.ts line 42',
-  ];
-
-  for (const utterance of testUtterances) {
-    console.log(`\n${'='.repeat(60)}`);
-    const result = await processUtterance(utterance, 'demo_hmac_key');
-    if (result) {
-      console.log(`[Result] success=${String(result.success)} output=${result.output.slice(0, 100)}`);
-    }
+  for (const utterance of ['Install express', 'What is on port 3000', 'Open localhost:8080']) {
+    console.log(`\n${'='.repeat(40)}`);
+    const result = await processUtterance(utterance, 'demo');
+    if (result) console.log(`success=${String(result.success)} output=${result.output.slice(0, 80)}`);
     await sleep(500);
   }
-
-  console.log(`\n${'='.repeat(60)}`);
-  console.log('[Agent] Classification demo complete.');
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 main().catch((error: unknown) => {

@@ -171,3 +171,21 @@ export async function createAIConversation(
 export async function destroyAIConversation(taskId: string): Promise<void> {
   await trtcApiRequest('StopAIConversation', { TaskId: taskId });
 }
+
+/**
+ * Makes the AI bot speak a text message via TTS (server push).
+ * Uses ControlAIConversation with ServerPushText command.
+ * @param taskId - The bot's task ID
+ * @param text - Text for the bot to speak
+ * @param interrupt - Whether to interrupt current speech (default: true)
+ */
+export async function pushTextToBot(taskId: string, text: string, interrupt = true): Promise<void> {
+  await trtcApiRequest('ControlAIConversation', {
+    TaskId: taskId,
+    Command: 'ServerPushText',
+    ServerPushText: {
+      Text: text,
+      Interrupt: interrupt,
+    },
+  });
+}

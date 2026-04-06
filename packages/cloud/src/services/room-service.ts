@@ -7,7 +7,7 @@
 
 import type { Session, TRTCRoomConfig } from '@deskpilot/shared';
 import { generateRoomId } from '@deskpilot/shared';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 import { config } from '../config.js';
 import { generateUserSig } from '../trtc/usersig.js';
 import { getSupabase } from '../db/supabase.js';
@@ -145,6 +145,88 @@ export async function getActiveSessionByUserId(userId: string): Promise<Session 
     createdAt: new Date(row.created_at).getTime(),
     lastActivityAt: new Date(row.last_activity_at).getTime(),
     hmacKey: row.hmac_key,
+  };
+}
+
+/**
+ * Registers a PC device with a persistent room and fixed pairing code.
+ * If already registered, returns existing config.
+ * @param pcId - Unique PC device identifier
+ * @param displayName - Human-readable device name
+ * @returns Device config with persistent room and pairing code
+ */
+export async function registerDevice(
+  pcId: string,
+  displayName?: string,
+): Promise<{ roomId: string; pairingCode: string; hmacKey: string }> {
+  const db = getSupabase();
+
+  // Check if device already registered
+  const { data: existing } = await db
+    .from('pc_devices')
+    .select('*')
+    .eq('pc_id', pcId)
+    .limit(1)
+    .single();
+
+  if (existing) {
+    // Update last_seen
+    await db.from('pc_devices').update({ last_seen_at: new Date().toISOString() }).eq('pc_id', pcId);
+
+    type DeviceRow = { pc_id: string; pairing_code: string; room_id: string; hmac_key: string };
+    const row = existing as unknown as DeviceRow;
+    return {
+      roomId: row.room_id,
+      pairingCode: row.pairing_code,
+      hmacKey: row.hmac_key,
+    };
+  }
+
+  // New device — generate persistent room + code
+  const roomId = `dp_${pcId}_room`;
+  const pairingCode = String(randomInt(100000, 999999));
+  const hmacKey = randomBytes(32).toString('hex');
+
+  const { error } = await db.from('pc_devices').insert({
+    pc_id: pcId,
+    pairing_code: pairingCode,
+    room_id: roomId,
+    display_name: displayName ?? pcId,
+    hmac_key: hmacKey,
+  });
+
+  if (error) {
+    throw new Error(`Failed to register device: ${error.message}`);
+  }
+
+  console.log(`[RoomService] Device registered: ${pcId}, code: ${pairingCode}, room: ${roomId}`);
+  return { roomId, pairingCode, hmacKey };
+}
+
+/**
+ * Looks up a device by its fixed pairing code.
+ * @param code - The 6-digit pairing code
+ * @returns Device info or null
+ */
+export async function findDeviceByCode(code: string): Promise<{
+  pcId: string; roomId: string; hmacKey: string; displayName: string;
+} | null> {
+  const { data, error } = await getSupabase()
+    .from('pc_devices')
+    .select('*')
+    .eq('pairing_code', code)
+    .limit(1)
+    .single();
+
+  if (error || !data) return null;
+
+  type DeviceRow = { pc_id: string; room_id: string; hmac_key: string; display_name: string };
+  const row = data as unknown as DeviceRow;
+  return {
+    pcId: row.pc_id,
+    roomId: row.room_id,
+    hmacKey: row.hmac_key,
+    displayName: row.display_name,
   };
 }
 

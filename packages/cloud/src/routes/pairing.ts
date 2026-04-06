@@ -8,8 +8,8 @@
 import { Router } from 'express';
 import { z } from 'zod/v4';
 import { generatePairingCode, verifyPairingCode } from '../services/pairing-service.js';
-import { generateRoomConfig, getActiveSessionByUserId } from '../services/room-service.js';
-import { createBot, hasBotInRoom } from '../services/bot-service.js';
+import { generateRoomConfig, getActiveSessionByUserId, findDeviceByCode, registerDevice } from '../services/room-service.js';
+import { createBot, destroyBot, hasBotInRoom } from '../services/bot-service.js';
 
 export const pairingRouter = Router();
 
@@ -50,34 +50,40 @@ pairingRouter.post('/verify', async (req, res) => {
   try {
     console.log(`[Pairing] Verifying code: ${parsed.data.pairingCode} for mobile: ${parsed.data.mobileUserId}`);
 
-    const pairing = await verifyPairingCode(parsed.data.pairingCode);
-    if (!pairing) {
+    // First try persistent device code (new model)
+    const device = await findDeviceByCode(parsed.data.pairingCode);
+
+    // Fallback to legacy temporary pairing code
+    const pairing = device ? null : await verifyPairingCode(parsed.data.pairingCode);
+
+    if (!device && !pairing) {
       console.log(`[Pairing] Code ${parsed.data.pairingCode} is invalid or expired`);
       res.status(400).json({ error: 'Invalid or expired pairing code' });
       return;
     }
 
-    console.log(`[Pairing] Code valid, PC user: ${pairing.pcUserId}`);
+    const pcUserId = device?.pcId ?? pairing!.pcUserId;
+    const roomId = device?.roomId ?? (await getActiveSessionByUserId(pairing!.pcUserId))?.roomId ?? `dp_${pairing!.pcUserId}_paired`;
 
-    // Use the PC agent's existing session room so all participants share one TRTC room
-    const activeSession = await getActiveSessionByUserId(pairing.pcUserId);
-    const roomId = activeSession?.roomId ?? `dp_${pairing.pcUserId}_paired`;
-    console.log(`[Pairing] Room: ${roomId} (from ${activeSession ? 'active session' : 'generated'})`);
+    console.log(`[Pairing] Code valid, PC: ${pcUserId}, Room: ${roomId} (${device ? 'persistent device' : 'legacy pairing'})`);
 
     const mobileRoomConfig = generateRoomConfig(roomId, parsed.data.mobileUserId);
-    const pcRoomConfig = generateRoomConfig(roomId, pairing.pcUserId);
+    const pcRoomConfig = generateRoomConfig(roomId, pcUserId);
 
-    // Auto-create AI bot in the room on successful pairing, targeting mobile user
-    if (!hasBotInRoom(roomId)) {
+    // Recreate AI bot targeting the current mobile user
+    // (destroy old bot first if exists, since targetUserId may have changed)
+    if (hasBotInRoom(roomId)) {
       try {
-        const botResult = await createBot(roomId, parsed.data.mobileUserId);
-        console.log(`[Pairing] Bot created for room ${roomId}, taskId: ${botResult.taskId}`);
-      } catch (botErr: unknown) {
-        const botMsg = botErr instanceof Error ? botErr.message : 'Unknown';
-        console.error(`[Pairing] Bot creation FAILED for room ${roomId}: ${botMsg}`);
-      }
-    } else {
-      console.log(`[Pairing] Bot already exists in room ${roomId}`);
+        await destroyBot(roomId);
+        console.log(`[Pairing] Destroyed old bot in room ${roomId}`);
+      } catch { /* ignore */ }
+    }
+    try {
+      const botResult = await createBot(roomId, parsed.data.mobileUserId);
+      console.log(`[Pairing] Bot created for room ${roomId}, target: ${parsed.data.mobileUserId}, taskId: ${botResult.taskId}`);
+    } catch (botErr: unknown) {
+      const botMsg = botErr instanceof Error ? botErr.message : 'Unknown';
+      console.error(`[Pairing] Bot creation FAILED for room ${roomId}: ${botMsg}`);
     }
 
     console.log(`[Pairing] Success! Mobile config: sdkAppId=${String(mobileRoomConfig.sdkAppId)}, room=${mobileRoomConfig.roomId}, user=${mobileRoomConfig.userId}`);
@@ -85,7 +91,8 @@ pairingRouter.post('/verify', async (req, res) => {
     res.json({
       message: 'Pairing successful',
       roomId,
-      pcUserId: pairing.pcUserId,
+      pcUserId,
+      pcDisplayName: device?.displayName ?? pcUserId,
       mobileRoomConfig,
       pcRoomConfig,
     });

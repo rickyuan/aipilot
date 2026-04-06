@@ -3,6 +3,9 @@
  */
 
 import { spawn } from 'node:child_process';
+import { existsSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { homedir } from 'node:os';
 import type { CommandPayload, CommandResult } from '@deskpilot/shared';
 
 /**
@@ -17,21 +20,44 @@ export async function executeVSCode(command: CommandPayload): Promise<CommandRes
   // Determine the VS Code CLI args based on intent
   let args: string[];
 
+  // Resolve common path aliases
+  const resolvePath = (p: string): string => {
+    if (p.startsWith('~/')) return resolve(homedir(), p.slice(2));
+    if (p === 'desktop' || p === '桌面') return resolve(homedir(), 'Desktop');
+    if (p === 'downloads' || p === '下载') return resolve(homedir(), 'Downloads');
+    if (p === 'documents' || p === '文档') return resolve(homedir(), 'Documents');
+    return p;
+  };
+
+  let useOpen = false; // Use macOS 'open' instead of VS Code
+
   switch (command.intentType) {
-    case 'file.navigate':
-      // Open a file or folder in VS Code
-      args = [params['path'] ?? command.instruction];
+    case 'file.navigate': {
+      const targetPath = resolvePath(params['path'] ?? command.instruction);
+      // If it's a regular folder (not a code project), open with Finder
+      try {
+        if (existsSync(targetPath) && statSync(targetPath).isDirectory()) {
+          const hasPackageJson = existsSync(resolve(targetPath, 'package.json'));
+          const hasGit = existsSync(resolve(targetPath, '.git'));
+          if (!hasPackageJson && !hasGit) {
+            useOpen = true;
+          }
+        }
+      } catch { /* ignore */ }
+      args = [targetPath];
       break;
+    }
     case 'editor.action':
-      // Run a VS Code command
       args = ['--command', params['action'] ?? command.instruction];
       break;
     default:
       args = [command.instruction];
   }
 
-  return new Promise((resolve) => {
-    const child = spawn('code', args, {
+  const cmd = useOpen ? 'open' : 'code';
+
+  return new Promise((done) => {
+    const child = spawn(cmd, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -47,10 +73,10 @@ export async function executeVSCode(command: CommandPayload): Promise<CommandRes
     });
 
     child.on('close', (code) => {
-      resolve({
+      done({
         commandId: command.commandId,
         success: code === 0,
-        output: stdout || `VS Code action executed: ${args.join(' ')}`,
+        output: stdout || `Opened: ${args.join(' ')}`,
         error: code !== 0 ? stderr : undefined,
         durationMs: Date.now() - startTime,
         timestamp: Date.now(),
@@ -58,11 +84,11 @@ export async function executeVSCode(command: CommandPayload): Promise<CommandRes
     });
 
     child.on('error', (err: Error) => {
-      resolve({
+      done({
         commandId: command.commandId,
         success: false,
         output: '',
-        error: `Failed to spawn VS Code CLI: ${err.message}`,
+        error: `Failed to open: ${err.message}`,
         durationMs: Date.now() - startTime,
         timestamp: Date.now(),
       });
